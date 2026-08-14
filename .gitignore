@@ -1,5 +1,5 @@
 .vscode/*
-vendor/*
+# vendor/*
 !vendor/.preserve
 out
 tmp
