@@ -17,6 +17,7 @@ export MESA_D3D12_DEFAULT_ADAPTER_NAME=${MESA_D3D12_DEFAULT_ADAPTER_NAME:-nvidia
 # vulkan is not supported with d3d12 afaik
 export GSK_RENDERER=gl
 
+export XDG_CURRENT_DESKTOP=GNOME
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/mutter-xdg-runtime}"
 mkdir -p "${XDG_RUNTIME_DIR}"
 
@@ -29,7 +30,6 @@ export MUTTER_RDP="${MUTTER_RDP:-1}"
 # (Gvc.MixerControl -> PulseAudio -> X11 root window probe). See the comment in
 # meta_context_main_get_x11_display_policy(); this env var is our patch.
 export MUTTER_X11_MANDATORY=1
-export G_MESSAGES_DEBUG="${G_MESSAGES_DEBUG:-all}"
 
 
 if [[ ${USE_TCP:-} != "1" ]] ; then
@@ -77,4 +77,4 @@ gnome-shell \
   --headless \
   --virtual-monitor 1920x1080 \
   --wayland-display wayland-rdp \
-  "$@" 2>&1 | tee gnome.log
+  "$@"
