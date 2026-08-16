@@ -5,10 +5,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build/mutter"
 PREFIX="${SCRIPT_DIR}/_install"
 
-# Always build/link mutter's RDP backend against the Microsoft FreeRDP fork we
-# install into ${PREFIX} (never nixpkgs' freerdp).
-"${SCRIPT_DIR}/build-freerdp.sh"
-
 export PKG_CONFIG_PATH="${PREFIX}/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
 
 if [ ! -f "${BUILD_DIR}/okay" ]; then
@@ -31,4 +27,4 @@ if [ ! -f "${BUILD_DIR}/okay" ]; then
   touch "${BUILD_DIR}/okay"
 fi
 
-meson install -C "${BUILD_DIR}"
+meson install -C "${BUILD_DIR}" 2>&1 | grep -v Installing

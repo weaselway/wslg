@@ -21,6 +21,8 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/mutter-xdg-runtime}"
 # mutter's Wayland socket. Hardcoded to match run-vsock.sh --wayland-display.
 export WAYLAND_DISPLAY=wayland-rdp
 
+# export LD_LIBRARY_PATH=$PWD/_install/lib/
+
 WAYLAND_SOCKET="${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}"
 if [ ! -S "${WAYLAND_SOCKET}" ]; then
   echo "error: Wayland socket ${WAYLAND_SOCKET} not found." >&2
@@ -93,7 +95,7 @@ if DISPLAY_CANDIDATE="$(find_display)"; then
 fi
 
 export GALLIUM_DRIVER=d3d12
-export MESA_D3D12_DEFAULT_ADAPTER_NAME=nvidia
+export MESA_D3D12_DEFAULT_ADAPTER_NAME=${MESA_D3D12_DEFAULT_ADAPTER_NAME:-nvidia}
 
 # Prefer the Wayland backends by default; toolkits that can't will still fall
 # back to Xwayland via DISPLAY/XAUTHORITY set above.

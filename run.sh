@@ -7,7 +7,9 @@ PREFIX="${SCRIPT_DIR}/_install"
 
 # we want gpu acceleration
 export GALLIUM_DRIVER=d3d12
-export MESA_D3D12_DEFAULT_ADAPTER_NAME=nvidia
+export MESA_D3D12_DEFAULT_ADAPTER_NAME=${MESA_D3D12_DEFAULT_ADAPTER_NAME:-nvidia}
+
+# vulkan is not supported with d3d12 afaik
 export GSK_RENDERER=gl
 
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/mutter-xdg-runtime}"
@@ -23,17 +25,20 @@ export GSETTINGS_SCHEMA_DIR="${PREFIX}/share/glib-2.0/schemas"
 export MUTTER_RDP="${MUTTER_RDP:-1}"
 export G_MESSAGES_DEBUG="${G_MESSAGES_DEBUG:-all}"
 
-# When running under WSLg, WSLGd (with WSLG_USE_MUTTER=1) publishes the RDP
-# transport it reserved (and handed to msrdc) to this data-only env file. Source
-# it to pick up MUTTER_RDP_VSOCK_PORT (the vsock port to bind) and, when shared
-# memory is available, WSLG_SHARED_MEMORY_VIRTIO_TAG (the virtiofs tag to mount).
-# If the file is absent we fall back to whatever transport env is already set
-# (MUTTER_RDP_VSOCK_PORT / USE_VSOCK / MUTTER_RDP_PORT for TCP debugging).
-MUTTER_RDP_ENV_FILE="${MUTTER_RDP_ENV_FILE:-/mnt/wslg/mutter-rdp.env}"
-if [ -r "${MUTTER_RDP_ENV_FILE}" ]; then
-  # shellcheck disable=SC1090
-  . "${MUTTER_RDP_ENV_FILE}"
-  export MUTTER_RDP_VSOCK_PORT
+
+if [[ ${USE_TCP:-} != "1" ]] ; then
+    # When running under WSLg, WSLGd (with WSLG_USE_MUTTER=1) publishes the RDP
+    # transport it reserved (and handed to msrdc) to this data-only env file. Source
+    # it to pick up MUTTER_RDP_VSOCK_PORT (the vsock port to bind) and, when shared
+    # memory is available, WSLG_SHARED_MEMORY_VIRTIO_TAG (the virtiofs tag to mount).
+    # If the file is absent we fall back to whatever transport env is already set
+    # (MUTTER_RDP_VSOCK_PORT / USE_VSOCK / MUTTER_RDP_PORT for TCP debugging).
+    MUTTER_RDP_ENV_FILE="${MUTTER_RDP_ENV_FILE:-/mnt/wslg/mutter-rdp.env}"
+    if [ -r "${MUTTER_RDP_ENV_FILE}" ]; then
+    # shellcheck disable=SC1090
+    . "${MUTTER_RDP_ENV_FILE}"
+    export MUTTER_RDP_VSOCK_PORT
+    fi
 fi
 
 # WSLGd mounts the shared-memory DAX share only in the system-distro mount
