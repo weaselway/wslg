@@ -21,8 +21,6 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/mutter-xdg-runtime}"
 # mutter's Wayland socket. Hardcoded to match run-vsock.sh --wayland-display.
 export WAYLAND_DISPLAY=wayland-rdp
 
-# export LD_LIBRARY_PATH=$PWD/_install/lib/
-
 WAYLAND_SOCKET="${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}"
 if [ ! -S "${WAYLAND_SOCKET}" ]; then
   echo "error: Wayland socket ${WAYLAND_SOCKET} not found." >&2

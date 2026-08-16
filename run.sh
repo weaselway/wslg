@@ -2,8 +2,13 @@
 
 set -xeuo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PREFIX="${SCRIPT_DIR}/_install"
+# build.sh installs mutter straight over the distro packages in /usr, so there is
+# exactly one libmutter-18 / libmutter-cogl-18 / ... on the system and nothing
+# here needs LD_LIBRARY_PATH, GI_TYPELIB_PATH, PATH or GSETTINGS_SCHEMA_DIR
+# overrides. Two copies of those libraries cannot coexist in one process: they
+# share a SONAME but not an inode, so ld.so maps both, and the second one to run
+# its constructors fails to register its GTypes (CoglColor et al), which took
+# gnome-shell down at startup.
 
 # we want gpu acceleration
 export GALLIUM_DRIVER=d3d12
@@ -15,14 +20,15 @@ export GSK_RENDERER=gl
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/mutter-xdg-runtime}"
 mkdir -p "${XDG_RUNTIME_DIR}"
 
-# mutter and its private libraries (libmutter-*, libfreerdp2, ...) are installed
-# under this non-standard prefix and the binary carries no RPATH, so the loader
-# needs LD_LIBRARY_PATH to find them at runtime. PATH/GSETTINGS_SCHEMA_DIR point
-# at the same prefix so we run this build's mutter and its bundled schemas.
-export LD_LIBRARY_PATH="${PREFIX}/lib:${PREFIX}/lib/mutter-18${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-export PATH="${PREFIX}/bin:${PATH}"
-export GSETTINGS_SCHEMA_DIR="${PREFIX}/share/glib-2.0/schemas"
 export MUTTER_RDP="${MUTTER_RDP:-1}"
+
+# Start Xwayland eagerly instead of on first X11 connection. Launched from an
+# interactive shell we'd otherwise get the ON_DEMAND policy, where mutter owns
+# the X sockets and spawns Xwayland from the main loop -- and gnome-shell's
+# startup JS blocks that same main loop on a synchronous xcb_connect() to it
+# (Gvc.MixerControl -> PulseAudio -> X11 root window probe). See the comment in
+# meta_context_main_get_x11_display_policy(); this env var is our patch.
+export MUTTER_X11_MANDATORY=1
 export G_MESSAGES_DEBUG="${G_MESSAGES_DEBUG:-all}"
 
 
@@ -55,8 +61,20 @@ if [ -n "${WSLG_SHARED_MEMORY_VIRTIO_TAG:-}" ]; then
   export WSL2_SHARED_MEMORY_MOUNT_POINT="${SHARED_MEMORY_MOUNT_POINT}"
 fi
 
-exec "${PREFIX}/bin/mutter" \
+
+# gnome-shell links against libmutter, so it picks up our backend just by being
+# the installed one; it takes the same MetaContext options as the mutter binary.
+# Set BARE_MUTTER=1 to run mutter alone (no shell UI) for isolating backend bugs.
+if [[ ${BARE_MUTTER:-} == "1" ]]; then
+  exec mutter \
+    --headless \
+    --virtual-monitor 1920x1080 \
+    --wayland-display wayland-rdp \
+    "$@"
+fi
+
+gnome-shell \
   --headless \
   --virtual-monitor 1920x1080 \
   --wayland-display wayland-rdp \
-  "$@"
+  "$@" 2>&1 | tee gnome.log
