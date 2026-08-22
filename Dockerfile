@@ -26,7 +26,6 @@ RUN echo "== Install Core dependencies ==" && \
         cairo-devel \
         clang  \
         clang-devel  \
-        cmake  \
         dbus  \
         dbus-devel  \
         dbus-glib  \
@@ -125,19 +124,15 @@ RUN echo "== Install UI dependencies ==" && \
             xorg-x11-server-Xwayland-devel \
             xorg-x11-util-macros
 
-# Create an image with builds of FreeRDP and Weston
+# Create an image with the system distro's runtime pieces
 FROM build-env AS dev
 
 ARG WSLG_VERSION="<current>"
 ARG WSLG_COMMIT="<unknown>"
 ARG WSLG_ARCH="x86_64"
 ARG DIRECTX_HEADERS_VERSION="<unknown>"
-ARG FREERDP_COMMIT="<unknown>"
-ARG MESA_VERSION="<unknown>"
 ARG PULSEAUDIO_COMMIT="<unknown>"
-ARG WESTON_COMMIT="<unknown>"
 ARG SYSTEMDISTRO_DEBUG_BUILD
-ARG FREERDP_VERSION=2
 
 # Fail fast if any required --build-arg is missing or still holds a
 # placeholder value. We have to validate up-front because the values
@@ -159,10 +154,7 @@ RUN set -e; \
     for kv in "WSLG_VERSION=${WSLG_VERSION}" \
               "WSLG_COMMIT=${WSLG_COMMIT}" \
               "DIRECTX_HEADERS_VERSION=${DIRECTX_HEADERS_VERSION}" \
-              "FREERDP_COMMIT=${FREERDP_COMMIT}" \
-              "MESA_VERSION=${MESA_VERSION}" \
-              "PULSEAUDIO_COMMIT=${PULSEAUDIO_COMMIT}" \
-              "WESTON_COMMIT=${WESTON_COMMIT}"; do \
+              "PULSEAUDIO_COMMIT=${PULSEAUDIO_COMMIT}"; do \
         name=${kv%%=*}; val=${kv#*=}; \
         case "$val" in \
             ""|"<unknown>"|"<current>"|"unknown") \
@@ -172,7 +164,7 @@ RUN set -e; \
                 exit 1 ;; \
         esac; \
     done; \
-    echo "All 7 required --build-arg values present."
+    echo "All 4 required --build-arg values present."
 
 WORKDIR /work
 RUN printf 'WSLg: %s\nArchitecture: %s\nBuilt: %s\nOS: %s\n\n' \
@@ -184,10 +176,7 @@ RUN printf 'WSLg: %s\nArchitecture: %s\nBuilt: %s\nOS: %s\n\n' \
     printf '%-16s %s\n' \
         'wslg:'            "${WSLG_COMMIT}" \
         'DirectX-Headers:' "${DIRECTX_HEADERS_VERSION}" \
-        'FreeRDP:'         "${FREERDP_COMMIT}" \
-        'mesa:'            "${MESA_VERSION}" \
         'pulseaudio:'      "${PULSEAUDIO_COMMIT}" \
-        'weston:'          "${WESTON_COMMIT}" \
         >> /work/versions.txt
 
 #
@@ -200,22 +189,14 @@ ENV BUILDTYPE=${BUILDTYPE:-debugoptimized}
 ENV BUILDTYPE_NODEBUGSTRIP=${SYSTEMDISTRO_DEBUG_BUILD:+debug}
 ENV BUILDTYPE_NODEBUGSTRIP=${BUILDTYPE_NODEBUGSTRIP:-release}
 
-# FreeRDP is always built with RelWithDebInfo
-ENV BUILDTYPE_FREERDP=RelWithDebInfo
-
-ENV WITH_DEBUG_FREERDP=${SYSTEMDISTRO_DEBUG_BUILD:+ON}
-ENV WITH_DEBUG_FREERDP=${WITH_DEBUG_FREERDP:-OFF}
-
 RUN echo "== System distro build types ==" && \
     echo "    BUILDTYPE:              ${BUILDTYPE}" && \
-    echo "    BUILDTYPE_NODEBUGSTRIP: ${BUILDTYPE_NODEBUGSTRIP}" && \
-    echo "    BUILDTYPE_FREERDP:      ${BUILDTYPE_FREERDP}" && \
-    echo "    WITH_DEBUG_FREERDP:     ${WITH_DEBUG_FREERDP}"
+    echo "    BUILDTYPE_NODEBUGSTRIP: ${BUILDTYPE_NODEBUGSTRIP}"
 
 ENV DESTDIR=/work/build
 ENV PREFIX=/usr
 ENV PKG_CONFIG_PATH=${DESTDIR}${PREFIX}/lib/pkgconfig:${DESTDIR}${PREFIX}/lib/${WSLG_ARCH}-linux-gnu/pkgconfig:${DESTDIR}${PREFIX}/share/pkgconfig
-ENV C_INCLUDE_PATH=${DESTDIR}${PREFIX}/include/freerdp${FREERDP_VERSION}:${DESTDIR}${PREFIX}/include/winpr${FREERDP_VERSION}:${DESTDIR}${PREFIX}/include/wsl/stubs:${DESTDIR}${PREFIX}/include
+ENV C_INCLUDE_PATH=${DESTDIR}${PREFIX}/include/wsl/stubs:${DESTDIR}${PREFIX}/include
 ENV CPLUS_INCLUDE_PATH=${C_INCLUDE_PATH}
 ENV LIBRARY_PATH=${DESTDIR}${PREFIX}/lib
 ENV LD_LIBRARY_PATH=${LIBRARY_PATH}
@@ -234,16 +215,6 @@ RUN /usr/bin/meson --prefix=${PREFIX} build \
         -Dbuild-test=false && \
     ninja -C build -j8 install
 
-# Build mesa with the minimal options we need.
-COPY vendor/mesa /work/vendor/mesa
-WORKDIR /work/vendor/mesa
-RUN /usr/bin/meson --prefix=${PREFIX} build \
-        --buildtype=${BUILDTYPE_NODEBUGSTRIP} \
-        -Dgallium-drivers=swrast,d3d12 \
-        -Dvulkan-drivers= \
-        -Dllvm=disabled && \
-    ninja -C build -j8 install
-
 # Build PulseAudio
 COPY vendor/pulseaudio /work/vendor/pulseaudio
 WORKDIR /work/vendor/pulseaudio
@@ -254,74 +225,6 @@ RUN /usr/bin/meson --prefix=${PREFIX} build \
         -Dgsettings=disabled \
         -Dtests=false && \
     ninja -C build -j8 install
-
-# Build FreeRDP
-COPY vendor/FreeRDP /work/vendor/FreeRDP
-WORKDIR /work/vendor/FreeRDP
-RUN cmake -G Ninja \
-        -B build \
-        -DCMAKE_INSTALL_PREFIX=${PREFIX} \
-        -DCMAKE_INSTALL_LIBDIR=${PREFIX}/lib \
-        -DCMAKE_BUILD_TYPE=${BUILDTYPE_FREERDP} \
-        -DWITH_DEBUG_ALL=${WITH_DEBUG_FREERDP} \
-        -DWITH_ICU=ON \
-        -DWITH_SERVER=ON \
-        -DWITH_CHANNEL_GFXREDIR=ON \
-        -DWITH_CHANNEL_RDPAPPLIST=ON \
-        -DWITH_CLIENT=OFF \
-        -DWITH_CLIENT_COMMON=OFF \
-        -DWITH_CLIENT_CHANNELS=OFF \
-        -DWITH_CLIENT_INTERFACE=OFF \
-        -DWITH_LIBSYSTEMD=OFF \
-        -DWITH_WAYLAND=OFF \
-        -DWITH_X11=OFF \
-        -DWITH_PROXY=OFF \
-        -DWITH_SHADOW=OFF \
-        -DWITH_SAMPLE=OFF && \
-    ninja -C build -j8 install
-
-RUN /work/debuginfo/strip_debuginfo.sh "FreeRDP" "/work/debuginfo/FreeRDP${FREERDP_VERSION}.list"
-
-# Build rdpapplist RDP virtual channel plugin
-COPY rdpapplist /work/rdpapplist
-WORKDIR /work/rdpapplist
-RUN /usr/bin/meson --prefix=${PREFIX} build \
-        --buildtype=${BUILDTYPE} && \
-    ninja -C build -j8 install
-
-RUN /work/debuginfo/strip_debuginfo.sh "rdpapplist" "/work/debuginfo/rdpapplist.list"
-
-# Build Weston
-COPY vendor/weston /work/vendor/weston
-WORKDIR /work/vendor/weston
-RUN /usr/bin/meson --prefix=${PREFIX} build \
-        --buildtype=${BUILDTYPE} \
-        -Dbackend-default=rdp \
-        -Dbackend-drm=false \
-        -Dbackend-drm-screencast-vaapi=false \
-        -Dbackend-headless=false \
-        -Dbackend-wayland=false \
-        -Dbackend-x11=false \
-        -Dbackend-fbdev=false \
-        -Dcolor-management-colord=false \
-        -Dscreenshare=false \
-        -Dsystemd=false \
-        -Dwslgd=true \
-        -Dremoting=false \
-        -Dpipewire=false \
-        -Dshell-fullscreen=false \
-        -Dcolor-management-lcms=false \
-        -Dshell-ivi=false \
-        -Dshell-kiosk=false \
-        -Ddemo-clients=false \
-        -Dsimple-clients=[] \
-        -Dtools=[] \
-        -Dresize-pool=false \
-        -Dwcap-decode=false \
-        -Dtest-junit-xml=false && \
-    ninja -C build -j8 install
-
-RUN /work/debuginfo/strip_debuginfo.sh "weston" "/work/debuginfo/weston.list"
 
 # Build WSLGd Daemon
 ENV CC=/usr/bin/clang
@@ -423,7 +326,7 @@ RUN if [ -z "$SYSTEMDISTRO_DEBUG_BUILD" ] ; then \
         rpm -e --nodeps $(rpm -qa | grep -- '^perl-') && \
         # Remove all -devel packages \
         rpm -e --nodeps $(rpm -qa | grep -- '-devel') && \
-        # Remove systemd components (except systemd-libs which is needed by weston) \
+        # Remove systemd components (except systemd-libs which is needed by WSLGd) \
         rpm -e --nodeps $(rpm -qa | grep -- '^systemd-' | grep -v systemd-libs) && \
         # Remove orphaned packages \
         tdnf autoremove -y && \
@@ -431,8 +334,6 @@ RUN if [ -z "$SYSTEMDISTRO_DEBUG_BUILD" ] ; then \
         # Remove docs, man pages, locales, gtk-doc \
         rm -rf /usr/share/man /usr/share/info /usr/share/locale /usr/share/gtk-doc && \
         find /usr/share/doc -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + && \
-        # Remove unused Mesa driver \
-        rm -f /usr/lib64/dri/virtio_gpu_dri.so && \
         # Remove hardware database (not needed in WSL) \
         rm -rf /usr/share/hwdata/* && \
         # Remove temporary files, logs, caches, and systemd catalog \
@@ -458,7 +359,6 @@ RUN useradd -u 1000 --create-home wslg && \
 
 # Copy config files.
 COPY config/wsl.conf /etc/wsl.conf
-COPY config/weston.ini /home/wslg/.config/weston.ini
 COPY config/local.conf /etc/fonts/local.conf
 
 # Copy default icon file.
@@ -479,15 +379,6 @@ COPY --from=dev /work/vendor/pulseaudio/GPL \
                 /work/vendor/pulseaudio/LICENSE \
                 /work/vendor/pulseaudio/NEWS \
                 /work/vendor/pulseaudio/README /usr/share/doc/pulseaudio/
-
-# Copy the licensing information for Weston
-COPY --from=dev /work/vendor/weston/COPYING /usr/share/doc/weston/COPYING
-
-# Copy the licensing information for FreeRDP
-COPY --from=dev /work/vendor/FreeRDP/LICENSE /usr/share/doc/FreeRDP/LICENSE
-
-# copy the documentation and licensing information for mesa
-COPY --from=dev /work/vendor/mesa/docs /usr/share/doc/mesa/
 
 COPY --from=dev /work/versions.txt /etc/versions.txt
 

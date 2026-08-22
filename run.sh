@@ -23,6 +23,11 @@ mkdir -p "${XDG_RUNTIME_DIR}"
 
 export MUTTER_RDP="${MUTTER_RDP:-1}"
 
+# remove symlink if it exists
+if [ -L /tmp/.X11-unix  ] ; then
+    sudo rm -f /tmp/.X11-unix
+fi
+
 # Start Xwayland eagerly instead of on first X11 connection. Launched from an
 # interactive shell we'd otherwise get the ON_DEMAND policy, where mutter owns
 # the X sockets and spawns Xwayland from the main loop -- and gnome-shell's
@@ -31,6 +36,10 @@ export MUTTER_RDP="${MUTTER_RDP:-1}"
 # meta_context_main_get_x11_display_policy(); this env var is our patch.
 export MUTTER_X11_MANDATORY=1
 
+systemctl --user set-environment GSK_RENDERER="$GSK_RENDERER"
+systemctl --user set-environment GALLIUM_DRIVER="$GALLIUM_DRIVER"
+systemctl --user set-environment MESA_D3D12_DEFAULT_ADAPTER_NAME="$MESA_D3D12_DEFAULT_ADAPTER_NAME"
+systemctl --user set-environment XDG_CURRENT_DESKTOP="$XDG_CURRENT_DESKTOP"
 
 if [[ ${USE_TCP:-} != "1" ]] ; then
     # When running under WSLg, WSLGd (with WSLG_USE_MUTTER=1) publishes the RDP
