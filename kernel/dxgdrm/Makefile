@@ -2,7 +2,8 @@
 # There are no /lib/modules/$(uname -r)/build headers on WSL, so KDIR has to
 # point at a tree checked out at the matching linux-msft-wsl-* tag and built far
 # enough to produce Module.symvers (CONFIG_MODVERSIONS=y means the CRCs matter).
-KDIR ?= $(HOME)/dev/WSL2-Linux-Kernel
+# ../../build-kernel-headers.sh produces exactly that, here:
+KDIR ?= $(CURDIR)/../../build/wsl-kernel
 
 # LOCALVERSION must be set (to empty) or setlocalversion appends a "+" for a
 # tree that is not sitting on an annotated tag -- which a shallow clone is not.

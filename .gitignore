@@ -3,6 +3,11 @@
 !vendor/.preserve
 out
 tmp
+
+# Generated build trees. The meson ones each drop their own .gitignore with
+# a '*' in it, but build/wsl-kernel is a git clone and would otherwise show up
+# as an untracked nested repo.
+build/
 *.nupkg
 *.tar
 *.vhd
