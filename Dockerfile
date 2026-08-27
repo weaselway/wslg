@@ -6,123 +6,31 @@ ARG MARINER_IMAGE=mcr.microsoft.com/azurelinux/base/core:3.0
 # Create a builder image with the compilers, etc. needed
 FROM ${MARINER_IMAGE} AS build-env
 
-# Install all the required packages for building. This list is probably
-# longer than necessary.
-RUN echo "== Install Git/CA certificates ==" && \
+# Install the packages needed to build PulseAudio and WSLGd. The system distro
+# no longer builds a compositor (mutter runs in the user distro), so nothing
+# here pulls in a graphics/X11 stack.
+RUN echo "== Install build dependencies ==" && \
     tdnf install -y \
+        binutils \
+        build-essential \
+        ca-certificates \
+        clang \
+        dbus-devel \
+        diffutils \
+        file-libs \
+        gcc \
+        gettext \
         git \
-        ca-certificates
-
-RUN echo "== Install Core dependencies ==" && \
-    tdnf install -y \
-        alsa-lib \
-        alsa-lib-devel  \
-        autoconf  \
-        automake  \
-        binutils  \
-        bison  \
-        build-essential  \
-        cairo \
-        cairo-devel \
-        clang  \
-        clang-devel  \
-        dbus  \
-        dbus-devel  \
-        dbus-glib  \
-        dbus-glib-devel  \
-        diffutils  \
-        elfutils-devel  \
-        file-libs  \
-        flex  \
-        fontconfig-devel  \
-        gawk  \
-        gcc  \
-        gettext  \
-        glibc-devel  \
-        glib-schemas \
-        gobject-introspection  \
-        gobject-introspection-devel  \
-        harfbuzz  \
-        harfbuzz-devel  \
-        kernel-headers  \
-        intltool \
-        libatomic_ops  \
-        libcap-devel  \
-        libffi  \
-        libffi-devel  \
-        libgudev  \
-        libgudev-devel  \
-        libjpeg-turbo  \
-        libjpeg-turbo-devel  \
-        libltdl  \
-        libltdl-devel  \
-        libpng-devel  \
-        librsvg2-devel \
-        libtiff  \
-        libtiff-devel  \
-        libusb  \
-        libusb-devel  \
-        libwebp  \
-        libwebp-devel  \
-        libxml2 \
-        libxml2-devel  \
-        make  \
-        meson  \
-        newt  \
-        nss  \
-        nss-libs  \
-        openldap  \
-        openssl-devel  \
-        pam-devel  \
-        pango  \
-        pango-devel  \
-        patch  \
-        perl-XML-Parser \
-        polkit-devel  \
-        python3-devel \
-        python3-mako  \
-        python3-markupsafe \
+        glibc-devel \
+        libcap-devel \
+        libltdl-devel \
+        libsndfile-devel \
+        libtool \
+        m4 \
+        make \
+        meson \
         sed \
-        sqlite-devel \
-        systemd-devel  \
-        tar \
-        unzip  \
-        vala  \
-        vala-devel  \
-        vala-tools  \
-        zlib-devel
-
-RUN echo "== Install UI dependencies ==" && \
-    tdnf    install -y \
-            libdrm-devel \
-            libepoxy-devel \
-            libevdev \
-            libevdev-devel \
-            libinput \
-            libinput-devel \
-            libpciaccess-devel \
-            libSM-devel \
-            libsndfile \
-            libsndfile-devel \
-            libXcursor \
-            libXcursor-devel \
-            libXdamage-devel \
-            libXfont2-devel \
-            libXi \
-            libXi-devel \
-            libxkbcommon-devel \
-            libxkbfile-devel \
-            libXrandr-devel \
-            libxshmfence-devel \
-            libXtst \
-            libXtst-devel \
-            libXxf86vm-devel \
-            wayland-devel \
-            wayland-protocols-devel \
-            xkbcomp \
-            xkeyboard-config \
-            xorg-x11-server-Xwayland-devel \
-            xorg-x11-util-macros
+        tar
 
 # Create an image with the system distro's runtime pieces
 FROM build-env AS dev
@@ -130,7 +38,6 @@ FROM build-env AS dev
 ARG WSLG_VERSION="<current>"
 ARG WSLG_COMMIT="<unknown>"
 ARG WSLG_ARCH="x86_64"
-ARG DIRECTX_HEADERS_VERSION="<unknown>"
 ARG PULSEAUDIO_COMMIT="<unknown>"
 ARG SYSTEMDISTRO_DEBUG_BUILD
 
@@ -153,7 +60,6 @@ ARG SYSTEMDISTRO_DEBUG_BUILD
 RUN set -e; \
     for kv in "WSLG_VERSION=${WSLG_VERSION}" \
               "WSLG_COMMIT=${WSLG_COMMIT}" \
-              "DIRECTX_HEADERS_VERSION=${DIRECTX_HEADERS_VERSION}" \
               "PULSEAUDIO_COMMIT=${PULSEAUDIO_COMMIT}"; do \
         name=${kv%%=*}; val=${kv#*=}; \
         case "$val" in \
@@ -164,7 +70,7 @@ RUN set -e; \
                 exit 1 ;; \
         esac; \
     done; \
-    echo "All 4 required --build-arg values present."
+    echo "All 3 required --build-arg values present."
 
 WORKDIR /work
 RUN printf 'WSLg: %s\nArchitecture: %s\nBuilt: %s\nOS: %s\n\n' \
@@ -175,7 +81,6 @@ RUN printf 'WSLg: %s\nArchitecture: %s\nBuilt: %s\nOS: %s\n\n' \
         > /work/versions.txt && \
     printf '%-16s %s\n' \
         'wslg:'            "${WSLG_COMMIT}" \
-        'DirectX-Headers:' "${DIRECTX_HEADERS_VERSION}" \
         'pulseaudio:'      "${PULSEAUDIO_COMMIT}" \
         >> /work/versions.txt
 
@@ -207,15 +112,9 @@ ENV CXX=/usr/bin/g++
 COPY debuginfo /work/debuginfo
 RUN chmod +x /work/debuginfo/*.sh
 
-# Build DirectX-Headers
-COPY vendor/DirectX-Headers-1.0 /work/vendor/DirectX-Headers-1.0
-WORKDIR /work/vendor/DirectX-Headers-1.0
-RUN /usr/bin/meson --prefix=${PREFIX} build \
-        --buildtype=${BUILDTYPE_NODEBUGSTRIP} \
-        -Dbuild-test=false && \
-    ninja -C build -j8 install
-
-# Build PulseAudio
+# Build PulseAudio. Only the RDP sink/source and the unix native protocol are
+# used (see WSLGd), so every backend that would drag a sound card, X11 or udev
+# into the image is turned off.
 COPY vendor/pulseaudio /work/vendor/pulseaudio
 WORKDIR /work/vendor/pulseaudio
 RUN /usr/bin/meson --prefix=${PREFIX} build \
@@ -223,7 +122,29 @@ RUN /usr/bin/meson --prefix=${PREFIX} build \
         -Ddatabase=simple \
         -Ddoxygen=false \
         -Dgsettings=disabled \
-        -Dtests=false && \
+        -Dtests=false \
+        -Dman=false \
+        -Dalsa=disabled \
+        -Dasyncns=disabled \
+        -Davahi=disabled \
+        -Dbluez5=disabled \
+        -Delogind=disabled \
+        -Dfftw=disabled \
+        -Dglib=disabled \
+        -Dgstreamer=disabled \
+        -Dgtk=disabled \
+        -Djack=disabled \
+        -Dlirc=disabled \
+        -Dopenssl=disabled \
+        -Dorc=disabled \
+        -Doss-output=disabled \
+        -Dsamplerate=disabled \
+        -Dsoxr=disabled \
+        -Dsystemd=disabled \
+        -Dtcpwrap=disabled \
+        -Dudev=disabled \
+        -Dwebrtc-aec=disabled \
+        -Dx11=disabled && \
     ninja -C build -j8 install
 
 # Build WSLGd Daemon
@@ -254,53 +175,36 @@ RUN if [ -z "$SYSTEMDISTRO_DEBUG_BUILD" ] ; then \
 
 FROM ${MARINER_IMAGE} AS runtime
 
-RUN echo "== Install Core/UI Runtime Dependencies ==" && \
+# Runtime dependencies. The system distro runs WSLGd, dbus and PulseAudio only:
+# the compositor, its X server and the RDP client all live outside this image,
+# so no graphics, font or X11 packages are installed.
+#
+# N.B. The Docker/containerd stack upstream installs here (moby-engine,
+# containerd2, docker-cli, docker-buildx, containernetworking-plugins, runc,
+# iptables) is deliberately left out: nothing in this image starts it -- there
+# is no systemd and WSLGd only launches dbus and PulseAudio -- and it accounted
+# for ~370MB of the image.
+RUN echo "== Install Runtime Dependencies ==" && \
     tdnf    install -y \
             busybox \
             ca-certificates \
-            cairo \
             chrony \
-            containerd2 \
-            containernetworking-plugins \
-            runc \
             dbus \
-            dbus-glib \
             dhcpcd \
-            docker-buildx \
-            docker-cli \
             e2fsprogs \
-            freefont \
             gzip \
-            icu \
-            iptables \
             kmod \
-            libinput \
-            libjpeg-turbo \
             libltdl \
-            libpng \
-            librsvg2 \
             libsndfile \
-            libwayland-client \
-            libwayland-server \
-            libwayland-cursor \
-            libwebp \
-            libXcursor \
-            libxkbcommon \
-            libXrandr \
             iproute \
-            moby-engine \
             nftables \
-            pango \
             procps-ng \
             rpm \
             sed \
             systemd-libs \
             tar \
             tzdata \
-            util-linux \
-            xcursor-themes \
-            xorg-x11-server-Xwayland \
-            xorg-x11-server-utils
+            util-linux
 
 # Install busybox utilities
 RUN /sbin/busybox --install -s
@@ -309,8 +213,16 @@ RUN /sbin/busybox --install -s
 ARG SYSTEMDISTRO_DEBUG_BUILD
 RUN if [ -z "$SYSTEMDISTRO_DEBUG_BUILD" ] ; then \
         echo "== Removing unnecessary packages ==" && \
+        # Erase only what is actually installed. Most of the list below used to \
+        # arrive as a dependency of the graphics/X11 stack; now that none of \
+        # that is installed, a plain `rpm -e` would fail on the missing ones \
+        # (and on an empty argument list from the greps further down). \
+        erase() { \
+            set -- $(for p in "$@"; do rpm -q "$p" > /dev/null 2>&1 && echo "$p"; done); \
+            if [ $# -gt 0 ]; then rpm -e --nodeps "$@"; fi; \
+        }; \
         # Remove build tools and packages not needed at runtime \
-        rpm -e --nodeps \
+        erase \
             cracklib-dicts \
             gcc \
             gcc-c++ \
@@ -323,19 +235,25 @@ RUN if [ -z "$SYSTEMDISTRO_DEBUG_BUILD" ] ; then \
             python3 \
             python3-libs && \
         # Remove all perl subpackages \
-        rpm -e --nodeps $(rpm -qa | grep -- '^perl-') && \
+        erase $(rpm -qa | grep -- '^perl-') && \
         # Remove all -devel packages \
-        rpm -e --nodeps $(rpm -qa | grep -- '-devel') && \
+        erase $(rpm -qa | grep -- '-devel') && \
         # Remove systemd components (except systemd-libs which is needed by WSLGd) \
-        rpm -e --nodeps $(rpm -qa | grep -- '^systemd-' | grep -v systemd-libs) && \
+        erase $(rpm -qa | grep -- '^systemd-' | grep -v systemd-libs) && \
         # Remove orphaned packages \
         tdnf autoremove -y && \
+        # Orphans autoremove leaves behind: ICU has no consumer left in the \
+        # image (only its own tools link it) and the X keyboard layouts went \
+        # unused when the X server left. \
+        erase icu xkeyboard-config && \
         echo "== Removing unnecessary files ==" && \
         # Remove docs, man pages, locales, gtk-doc \
         rm -rf /usr/share/man /usr/share/info /usr/share/locale /usr/share/gtk-doc && \
         find /usr/share/doc -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} + && \
         # Remove hardware database (not needed in WSL) \
         rm -rf /usr/share/hwdata/* && \
+        # Remove static libraries, which nothing at runtime can use \
+        find /usr/lib /usr/lib64 -name '*.a' -type f -delete && \
         # Remove temporary files, logs, caches, and systemd catalog \
         rm -rf /tmp/* /var/tmp/* /var/log/* /var/cache/* /usr/lib/systemd/catalog/*; \
     else \
@@ -344,9 +262,7 @@ RUN if [ -z "$SYSTEMDISTRO_DEBUG_BUILD" ] ; then \
              gdb \
              azurelinux-repos-debug \
              nano \
-             vim \
-             wayland-debuginfo \
-             xorg-x11-server-debuginfo; \
+             vim; \
     fi
 
 # Clear the tdnf cache to make the image smaller
@@ -359,19 +275,14 @@ RUN useradd -u 1000 --create-home wslg && \
 
 # Copy config files.
 COPY config/wsl.conf /etc/wsl.conf
-COPY config/local.conf /etc/fonts/local.conf
-
-# Copy default icon file.
-COPY resources/linux.png /usr/share/icons/wsl/linux.png
 
 # Copy the built artifacts from the build stage.
 COPY --from=dev /work/build/usr/ /usr/
 COPY --from=dev /work/build/etc/ /etc/
 
-# Append WSLg setttings to pulseaudio.
-COPY config/default_wslg.pa /etc/pulse/default_wslg.pa
-RUN cat /etc/pulse/default_wslg.pa >> /etc/pulse/default.pa
-RUN rm /etc/pulse/default_wslg.pa
+# N.B. The WSLg-specific pulseaudio snippet only ever loaded module-x11-bell,
+# which needs an X server in the system distro. There is none now, so the
+# stock default.pa is used as-is.
 
 # Copy the licensing information for PulseAudio
 COPY --from=dev /work/vendor/pulseaudio/GPL \

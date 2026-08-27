@@ -3,18 +3,11 @@
 #include "precomp.h"
 #include "common.h"
 #include "ProcessMonitor.h"
-#include "FontMonitor.h"
 
-#define CONFIG_FILE ".wslgconfig"
-#define MSRDC_EXE "msrdc.exe"
-#define MSTSC_EXE "mstsc.exe"
-#define GDBSERVER_PATH "/usr/bin/gdbserver"
-#define WESTON_NOTIFY_SOCKET SHARE_PATH "/weston-notify.sock"
-#define DEFAULT_ICON_PATH "/usr/share/icons"
-#define USER_DISTRO_ICON_PATH USER_DISTRO_MOUNT_PATH DEFAULT_ICON_PATH
 #define MAX_RESERVED_PORT 1024
-// Upper bound (exclusive) for the unprivileged vsock port scan used in mutter
-// mode, where the port is bound by an unprivileged user-distro process.
+// Upper bound (exclusive) for the unprivileged vsock port scan. The port is
+// bound by an unprivileged user-distro process (mutter), so it cannot live in
+// the reserved range WSLGd itself could have used.
 #define MAX_UNPRIVILEGED_SCAN_PORT 4096
 
 constexpr auto c_serviceIdTemplate = "%08X-FACB-11E6-BD58-64006A7986D3";
@@ -33,25 +26,11 @@ constexpr auto c_sharedMemoryMountPoint = "/mnt/shared_memory";
 constexpr auto c_sharedMemoryMountPointEnv = "WSL2_SHARED_MEMORY_MOUNT_POINT";
 constexpr auto c_sharedMemoryObDirectoryPathEnv = "WSL2_SHARED_MEMORY_OB_DIRECTORY";
 
-constexpr auto c_installPathEnv = "WSL2_INSTALL_PATH";
-constexpr auto c_userProfileEnv = "WSL2_USER_PROFILE";
-constexpr auto c_systemDistroEnvSection = "system-distro-env";
-
-constexpr auto c_windowsSystem32 = "/mnt/c/Windows/System32";
-
-constexpr auto c_westonShellDesktopEnv = "WSL2_WESTON_SHELL_DESKTOP";
-
-constexpr auto c_westonRdprailShell = "rdprail-shell";
-constexpr auto c_westonRdpdesktopShell = "desktop-shell";
-
-constexpr auto c_rdpRailFile = "wslg.rdp";
-constexpr auto c_rdpDesktopFile = "wslg_desktop.rdp";
-
-// In mutter mode WSLGd does not launch a compositor. Instead it publishes the
-// RDP transport info to a shell-sourceable env file in the shared /mnt/wslg
-// mount. A launcher in the user distro (see run-vsock.sh) sources this file and
-// starts its own mutter binary bound to the published vsock port. Mutter is not
-// baked into the system image; it lives in the user distro.
+// WSLGd does not launch a compositor or an RDP client. It publishes the RDP
+// transport info to a shell-sourceable env file in the shared /mnt/wslg mount.
+// A launcher in the user distro (see run-vsock.sh) sources this file, starts its
+// own mutter bound to the published vsock port, and starts the RDP client
+// itself. Neither mutter nor the RDP client is baked into the system image.
 constexpr auto c_mutterEnvFile = SHARE_PATH "/mutter-rdp.env";
 
 // The virtiofs tag WSLGd uses for the shared-memory DAX share. It is VM-wide, so
@@ -87,15 +66,6 @@ void LogException(const char *message, const char *exceptionDescription) noexcep
 {
     LogPrint(LOG_LEVEL_EXCEPTION, __FUNCTION__, __LINE__, "%s %s", message ? message : "Exception:", exceptionDescription);
     return;
-}
-
-bool IsNumeric(char *str)
-{
-    char* p;
-    if (!str)
-        return false;
-    strtol(str, &p, 10);
-    return *p == 0;
 }
 
 std::string ToServiceId(unsigned int port)
@@ -134,13 +104,12 @@ void WriteMutterEnvFile(
     contents += std::to_string(port);
     contents += "\n";
     // The Hyper-V VM GUID (hvsocket address) the RDP client must connect to,
-    // same value WSLGd passes as mstsc/msrdc's /v: argument.
+    // i.e. mstsc/msrdc's /v: argument.
     contents += "WSLG_VM_ID=";
     contents += vmId;
     contents += "\n";
     // The hvsocket service id (a GUID derived from the vsock port) that the RDP
-    // client on the Windows side must be pointed at. WSLGd does not launch the
-    // client in mutter mode, so the launcher needs this value.
+    // client on the Windows side must be pointed at.
     contents += "WSLG_SERVICE_ID=";
     contents += serviceId;
     contents += "\n";
@@ -168,29 +137,6 @@ void WriteMutterEnvFile(
     fd.reset();
 
     THROW_LAST_ERROR_IF(rename(tmpPath.c_str(), path) < 0);
-}
-
-std::string TranslateWindowsPath(const char * Path)
-{
-    std::string commandLine = "/usr/bin/wslpath -a \"";
-    commandLine += Path;
-    commandLine += "\"";
-    std::array<char, 128> buffer;
-    std::string result;
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(commandLine.c_str(), "r"), pclose);
-    THROW_LAST_ERROR_IF(!pipe);
-
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
-        result += buffer.data();
-    }
-    /* trim '\n' from wslpath output */
-    while (result.back() == '\n') {
-        result.pop_back();
-    }
-
-    THROW_ERRNO_IF(EINVAL, pclose(pipe.release()) != 0);
-
-    return result;
 }
 
 bool GetEnvBool(const char *EnvName, bool DefaultValue)
@@ -228,79 +174,20 @@ std::string GetVmId()
     return result;
 }
 
-void SetupOptionalEnv()
-{
-#if HAVE_WINPR
-    // Get the path to the WSLG config file.
-    std::string configFilePath = "/mnt/c/ProgramData/Microsoft/WSL/" CONFIG_FILE;
-    auto userProfile = getenv(c_userProfileEnv);
-    if (userProfile) {
-        configFilePath = TranslateWindowsPath(userProfile);
-        configFilePath += "/" CONFIG_FILE;
-    }
-
-    // Set additional environment variables.
-    wIniFile* wslgConfigIniFile = IniFile_New();
-    if (wslgConfigIniFile) {
-        if (IniFile_ReadFile(wslgConfigIniFile, configFilePath.c_str()) > 0) {
-            int numKeys = 0;
-            char **keyNames = IniFile_GetSectionKeyNames(wslgConfigIniFile, c_systemDistroEnvSection, &numKeys);
-            for (int n = 0; keyNames && n < numKeys; n++) {
-                const char *value = IniFile_GetKeyValueString(wslgConfigIniFile, c_systemDistroEnvSection, keyNames[n]);
-                if (value) {
-                    setenv(keyNames[n], value, true);
-                }
-            }
-
-            free(keyNames);
-        }
-
-        IniFile_Free(wslgConfigIniFile);
-    }
-#endif // HAVE_WINPR
-
-    return;
-}
-
-int SetupReadyNotify(const char *socket_path)
-{
-    struct sockaddr_un addr = {};
-    socklen_t size, name_size;
-
-    addr.sun_family = AF_LOCAL;
-    name_size = snprintf(addr.sun_path, sizeof addr.sun_path,
-                         "%s", socket_path) + 1;
-    size = offsetof(struct sockaddr_un, sun_path) + name_size;
-    unlink(addr.sun_path);
-
-    wil::unique_fd socketFd{socket(PF_LOCAL, SOCK_SEQPACKET, 0)};
-    THROW_LAST_ERROR_IF(!socketFd);
-
-    THROW_LAST_ERROR_IF(bind(socketFd.get(), reinterpret_cast<const sockaddr*>(&addr), size) < 0);
-    THROW_LAST_ERROR_IF(listen(socketFd.get(), 1) < 0);
-
-    return socketFd.release();
-}
-
-void WaitForReadyNotify(int notifyFd)
-{
-    // wait under client connects */
-    wil::unique_fd fd(accept(notifyFd, 0, 0));
-    THROW_LAST_ERROR_IF(!fd);
-}
-
 int main(int Argc, char *Argv[])
 try {
     wil::g_LogExceptionCallback = LogException;
 
-    // Restore default processing for SIGCHLD as both WSLGd and Xwayland depends on this.
+    // Restore default processing for SIGCHLD.
     signal(SIGCHLD, SIG_DFL);
 
     // Create a process monitor to track child processes
     wslgd::ProcessMonitor monitor(c_userName);
     auto passwordEntry = monitor.GetUserInfo();
 
-    // Set required environment variables.
+    // Set required environment variables. These are inherited by the child
+    // processes WSLGd launches (dbus-daemon and pulseaudio); the compositor and
+    // the RDP client run in the user distro and get their environment there.
     struct envVar{ const char* name; const char* value; bool override; };
     envVar variables[] = {
         {"HOME", passwordEntry->pw_dir, true},
@@ -309,24 +196,14 @@ try {
         {"SHELL", passwordEntry->pw_shell, true},
         {"PATH", "/usr/sbin:/usr/bin:/sbin:/bin:/usr/games", true},
         {"XDG_RUNTIME_DIR", c_xdgRuntimeDir, false},
-        {"WAYLAND_DISPLAY", "wayland-0", false},
-        {"DISPLAY", ":0", false},
-        {"XCURSOR_PATH", USER_DISTRO_ICON_PATH ":" DEFAULT_ICON_PATH , false},
-        {"XCURSOR_THEME", "whiteglass", false},
-        {"XCURSOR_SIZE", "16", false},
         {"PULSE_SERVER", SHARE_PATH "/PulseServer", false},
         {"PULSE_AUDIO_RDP_SINK", SHARE_PATH "/PulseAudioRDPSink", false},
         {"PULSE_AUDIO_RDP_SOURCE", SHARE_PATH "/PulseAudioRDPSource", false},
-        {"WSL2_DEFAULT_APP_ICON", DEFAULT_ICON_PATH "/wsl/linux.png", false},
-        {"WSL2_DEFAULT_APP_OVERLAY_ICON", DEFAULT_ICON_PATH "/wsl/linux.png", false},
-        {"MUTTER_V1", "v1", true},
     };
 
     for (auto &var : variables) {
         THROW_LAST_ERROR_IF(setenv(var.name, var.value, var.override) < 0);
     }
-
-    SetupOptionalEnv();
 
     // if any components output log to /dev/kmsg, make it writable.
     if (GetEnvBool("WSLG_LOG_KMSG", false))
@@ -357,15 +234,6 @@ try {
         return 1;
     }
 
-    // Query the WSL install path.
-    bool isWslInstallPathEnvPresent = false;
-    std::string wslInstallPath = "C:\\ProgramData\\Microsoft\\WSL";
-    auto installPath = getenv(c_installPathEnv);
-    if (installPath) {
-        isWslInstallPathEnvPresent = true;
-        wslInstallPath = installPath;
-    }
-
     // Bind mount the versions.txt file which contains version numbers of the various WSLG pieces.
     {
         wil::unique_fd fd(open(c_versionMount, (O_RDWR | O_CREAT), (S_IRUSR | S_IRGRP | S_IROTH)));
@@ -377,14 +245,13 @@ try {
     std::filesystem::create_directories(c_shareDocsMount);
     THROW_LAST_ERROR_IF(mount(c_shareDocsDir, c_shareDocsMount, NULL, MS_BIND | MS_RDONLY, NULL) < 0);
 
-    // Create a font folder monitor
-    wslgd::FontMonitor fontMonitor;
-
     // Make directories and ensure the correct permissions.
     std::filesystem::create_directories(c_dbusDir);
     THROW_LAST_ERROR_IF(chown(c_dbusDir, passwordEntry->pw_uid, passwordEntry->pw_gid) < 0);
     THROW_LAST_ERROR_IF(chmod(c_dbusDir, 0777) < 0);
 
+    // The user distro's Xwayland (started alongside mutter) creates its socket
+    // here; WSL bind mounts this directory in as /tmp/.X11-unix.
     std::filesystem::create_directories(c_x11RuntimeDir);
     THROW_LAST_ERROR_IF(chmod(c_x11RuntimeDir, 0777) < 0);
 
@@ -397,7 +264,7 @@ try {
     auto sharedMemoryObDirectoryPath = getenv(c_sharedMemoryObDirectoryPathEnv);
     if (sharedMemoryObDirectoryPath) {
         std::filesystem::create_directories(c_sharedMemoryMountPoint);
-        if (mount("wslg", c_sharedMemoryMountPoint, "virtiofs", 0, "dax") < 0) {
+        if (mount(c_sharedMemoryVirtioTag, c_sharedMemoryMountPoint, "virtiofs", 0, "dax") < 0) {
             LOG_ERROR("Failed to mount wslg shared memory %s.", strerror(errno));
         } else {
             THROW_LAST_ERROR_IF(chmod(c_sharedMemoryMountPoint, 0777) < 0);
@@ -407,29 +274,19 @@ try {
         LOG_ERROR("shared memory ob directory path is not set.");
     }
 
-    // When WSLG_USE_MUTTER is set, WSLGd does not launch a compositor itself.
-    // Instead, the user starts mutter externally (e.g. in the user distro), and
-    // mutter binds the RDP vsock. WSLGd still selects the reserved port and
-    // derives the hvsocket service ID for the RDP client, then publishes the
-    // chosen port to a file that the external mutter reads and binds.
-    bool useMutter = GetEnvBool("WSLG_USE_MUTTER", true);
-
-    // Create a listening vsock to be used for the RDP connection.
-    // Normally WSLGd (running as root) reserves a port in the privileged range
-    // (< 1024). In mutter mode the port is bound by the user-distro mutter, which
-    // runs unprivileged and cannot bind a reserved port, so scan an unprivileged
-    // range instead. The hvsocket service id is derived from whichever port is
-    // chosen, so the RDP client and mutter still agree.
+    // Pick the vsock port to be used for the RDP connection and derive the
+    // hvsocket service ID from it. The port is bound by the user-distro mutter,
+    // which runs unprivileged and cannot bind a reserved port, so scan the
+    // unprivileged range. WSLGd only probes for a free port here; it releases it
+    // again immediately so mutter can bind it.
     sockaddr_vm address{};
     address.svm_family = AF_VSOCK;
     address.svm_cid = VMADDR_CID_ANY;
     socklen_t addressSize = sizeof(address);
     wil::unique_fd socketFd{socket(AF_VSOCK, SOCK_STREAM, 0)};
     THROW_LAST_ERROR_IF(!socketFd);
-    unsigned int portScanStart = useMutter ? MAX_RESERVED_PORT : 1;
-    unsigned int portScanEnd = useMutter ? MAX_UNPRIVILEGED_SCAN_PORT : MAX_RESERVED_PORT;
     bool boundPort = false;
-    for (unsigned int port = portScanStart; port < portScanEnd; port += 1) {
+    for (unsigned int port = MAX_RESERVED_PORT; port < MAX_UNPRIVILEGED_SCAN_PORT; port += 1) {
         address.svm_port = port;
         if (bind(socketFd.get(), reinterpret_cast<const sockaddr*>(&address), addressSize) == 0) {
             boundPort = true;
@@ -445,29 +302,20 @@ try {
     // so the value is safe to embed in a text file.
     std::string serviceIdValue(ToServiceId(address.svm_port).c_str());
 
-    std::string socketEnvString("USE_VSOCK=");
-    std::string serviceIdEnvString("WSLG_SERVICE_ID=");
-    serviceIdEnvString += serviceIdValue;
-
-    if (useMutter) {
-        // Release the port so the user-distro mutter can bind it, and publish the
-        // transport info to the env file for the launcher to read. There is a
-        // brief window where the port is unbound; mutter is expected to bind it
-        // promptly and the reserved range is otherwise unused.
-        socketFd.reset();
-        WriteMutterEnvFile(
-            c_mutterEnvFile,
-            vmId,
-            address.svm_port,
-            serviceIdValue,
-            isSharedMemoryMounted,
-            sharedMemoryObDirectoryPath);
-        LOG_INFO("mutter mode: published RDP vsock port %u (service id %s) to %s",
-            address.svm_port, serviceIdValue.c_str(), c_mutterEnvFile);
-    } else {
-        THROW_LAST_ERROR_IF(listen(socketFd.get(), 1) < 0);
-        socketEnvString += std::to_string(socketFd.get());
-    }
+    // Release the port so the user-distro mutter can bind it, and publish the
+    // transport info to the env file for the launcher to read. There is a brief
+    // window where the port is unbound; mutter is expected to bind it promptly
+    // and the scanned range is otherwise unused.
+    socketFd.reset();
+    WriteMutterEnvFile(
+        c_mutterEnvFile,
+        vmId,
+        address.svm_port,
+        serviceIdValue,
+        isSharedMemoryMounted,
+        sharedMemoryObDirectoryPath);
+    LOG_INFO("published RDP vsock port %u (service id %s) to %s",
+        address.svm_port, serviceIdValue.c_str(), c_mutterEnvFile);
 
     struct rlimit limit;
     THROW_LAST_ERROR_IF(getrlimit(RLIMIT_NOFILE, &limit) < 0);
@@ -480,174 +328,6 @@ try {
         // shared memory is not available, env must be cleared if it's set.
         THROW_LAST_ERROR_IF(unsetenv(c_sharedMemoryMountPointEnv) < 0);
         isSharedMemoryMounted = false;
-    }
-
-    // Construct socket option string.
-    std::string westonSocketOption("--socket=");
-    westonSocketOption += getenv("WAYLAND_DISPLAY");
-
-    // Check if weston shell override is specified.
-    // Otherwise, default shell is 'rdprail-shell'.
-    // Alternatively, it can be 'desktop-shell'.
-    bool isRdpDesktopShell = GetEnvBool(c_westonShellDesktopEnv, false);
-    std::string westonShellName;
-    if (isRdpDesktopShell)
-        westonShellName = c_westonRdpdesktopShell;
-    else
-        westonShellName = c_westonRdprailShell;
-
-    // Construct shell option string.
-    std::string westonShellOption("--shell=");
-    westonShellOption += westonShellName;
-    westonShellOption += ".so";
-
-    // Construct log file option string.
-    std::string westonLogFileOption("--log=");
-    auto westonLogFilePathEnv = getenv("WSLG_WESTON_LOG_PATH");
-    if (westonLogFilePathEnv) {
-        westonLogFileOption += westonLogFilePathEnv;
-    } else {
-        westonLogFileOption += SHARE_PATH "/weston.log";
-    }
-
-    // Construct logger option string.
-    // By default, enable standard log and rdp-backend.
-    std::string westonLoggerOption("--logger-scopes=log,rdp-backend");
-    // If rdprail-shell is used, enable logger for that.
-    if (!isRdpDesktopShell) {
-        westonLoggerOption += ",";
-        westonLoggerOption += c_westonRdprailShell;
-    }
-
-    // Setup notify for wslgd-notify.so (weston only). Mutter does not implement
-    // the ready-notify protocol, so we skip the wait when launching mutter.
-    wil::unique_fd notifyFd;
-    if (!useMutter) {
-        notifyFd.reset(SetupReadyNotify(WESTON_NOTIFY_SOCKET));
-        THROW_LAST_ERROR_IF(!notifyFd);
-    }
-
-    if (useMutter) {
-        // Do not launch a compositor. A launcher in the user distro (see
-        // run-vsock.sh) sources the published env file (c_mutterEnvFile) to learn
-        // the reserved vsock port and binds it from its own mutter. WSLGd only
-        // publishes the env file (done above) and launches the RDP client below,
-        // which retries until mutter's listener is up.
-        LOG_INFO("mutter mode: skipping compositor launch (mutter is started externally)");
-    } else {
-        // Construct weston option string.
-        std::string westonArgs;
-        char *gdbServerPort = getenv("WSLG_WESTON_GDBSERVER_PORT");
-        if ((access(GDBSERVER_PATH, X_OK) == 0) && IsNumeric(gdbServerPort)) {
-            westonArgs += GDBSERVER_PATH;
-            westonArgs += " :";
-            westonArgs += gdbServerPort;
-            westonArgs += " ";
-        }
-        westonArgs += "/usr/bin/weston ";
-        westonArgs += "--backend=rdp-backend.so --modules=wslgd-notify.so --xwayland ";
-        westonArgs += westonSocketOption;
-        westonArgs += " ";
-        westonArgs += westonShellOption;
-        westonArgs += " ";
-        westonArgs += westonLogFileOption;
-        westonArgs += " ";
-        westonArgs += westonLoggerOption;
-
-        // Launch weston.
-        // N.B. Additional capabilities are needed to setns to the mount namespace of the user distro.
-        monitor.LaunchProcess(std::vector<std::string>{
-                    "/usr/bin/sh",
-                    "-c",
-                    std::move(westonArgs)
-                },
-                std::vector<cap_value_t>{
-                    CAP_SYS_ADMIN,
-                    CAP_SYS_CHROOT,
-                    CAP_SYS_PTRACE
-                },
-                std::vector<std::string>{
-                    std::move(socketEnvString),
-                    std::move(serviceIdEnvString),
-                    "WSLGD_NOTIFY_SOCKET=" WESTON_NOTIFY_SOCKET,
-                    "WESTON_DISABLE_ABSTRACT_FD=1",
-                    getenv("WLOG_APPENDER") ? : "", "WLOG_APPENDER=file",
-                    getenv("WLOG_FILEAPPENDER_OUTPUT_FILE_NAME") ? "" : "WLOG_FILEAPPENDER_OUTPUT_FILE_NAME=wlog.log",
-                    getenv("WLOG_FILEAPPENDER_OUTPUT_FILE_PATH") ? "" : "WLOG_FILEAPPENDER_OUTPUT_FILE_PATH=" SHARE_PATH
-                }
-            );
-    }
-
-    // Wait weston to be ready before starting RDP client, pulseaudio server.
-    // Mutter has no ready-notify; the RDP client connect will retry until the
-    // listener is up.
-    if (!useMutter) {
-        WaitForReadyNotify(notifyFd.get());
-        unlink(WESTON_NOTIFY_SOCKET);
-    }
-
-    // Start font monitoring if user distro's X11 fonts to be shared with system distro.
-    if (GetEnvBool("WSLG_USE_USER_DISTRO_XFONTS", true))
-        fontMonitor.Start();
-
-    // Launch the mstsc/msrdc client, unless mutter mode is in effect. In mutter
-    // mode everything the client needs (vsock port, hvsocket service id, shared
-    // memory tag and OB directory) has been published to c_mutterEnvFile, and the
-    // user-distro launcher starts the client itself alongside its own mutter.
-    if (useMutter) {
-        LOG_INFO("mutter mode: skipping RDP client launch (started externally)");
-    } else {
-        std::string remote("/v:");
-        remote += vmId;
-        std::string serviceId("/hvsocketserviceid:");
-        serviceId += serviceIdValue;
-        std::string sharedMemoryObPath("");
-        if (isSharedMemoryMounted) {
-            sharedMemoryObPath += "/wslgsharedmemorypath:";
-            sharedMemoryObPath += sharedMemoryObDirectoryPath;
-        }
-
-        std::filesystem::path rdpClientExePath;
-        bool isUseMstsc = GetEnvBool("WSLG_USE_MSTSC", false);
-        if (!isUseMstsc && !wslInstallPath.empty()) {
-            std::filesystem::path msrdcExePath = TranslateWindowsPath(wslInstallPath.c_str());
-            msrdcExePath /= MSRDC_EXE;
-            if (access(msrdcExePath.c_str(), X_OK) == 0) {
-                rdpClientExePath = std::move(msrdcExePath);
-            }
-        }
-        if (rdpClientExePath.empty()) {
-            rdpClientExePath = c_windowsSystem32;
-            rdpClientExePath /= MSTSC_EXE;
-        }
-
-        std::string wslDvcPlugin;
-        if (GetEnvBool("WSLG_USE_WSLDVC_PRIVATE", false))
-            wslDvcPlugin = "/plugin:WSLDVC_PRIVATE";
-        else if (isWslInstallPathEnvPresent)
-            wslDvcPlugin = "/plugin:WSLDVC_PACKAGE";
-        else
-            wslDvcPlugin = "/plugin:WSLDVC";
-
-        std::string rdpFilePathArg(wslInstallPath);
-        rdpFilePathArg += "\\"; // Windows-style path
-        if (isRdpDesktopShell)
-            rdpFilePathArg += c_rdpDesktopFile;
-        else
-            rdpFilePathArg += c_rdpRailFile;
-
-        monitor.LaunchProcess(std::vector<std::string>{
-            "/init",
-            std::move(rdpClientExePath),
-            basename(rdpClientExePath.c_str()),
-            "/wslg", // set wslg option first so following parameters are parsed in context of wslg.
-            "/silent", // then set silent option before anything-else.
-            std::move(remote),
-            std::move(serviceId),
-            std::move(wslDvcPlugin),
-            std::move(sharedMemoryObPath),
-            std::move(rdpFilePathArg)
-        });
     }
 
     // Launch the system dbus daemon.

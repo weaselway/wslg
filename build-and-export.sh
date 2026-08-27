@@ -22,25 +22,17 @@ WSLG_VERSION=${WSLG_VERSION:-dev}
 # build successfully.
 WSLG_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "dev")
 
-# Vendor components: use rev-parse for the git-sourced ones, fall back
-# to the "dev" sentinel if a vendor dir was sourced from a tarball locally.
-vendor_commit() { git -C "$1" rev-parse HEAD 2>/dev/null || echo "dev"; }
-DIRECTX_HEADERS_VERSION=$(vendor_commit vendor/DirectX-Headers-1.0)
-FREERDP_COMMIT=$(vendor_commit vendor/FreeRDP)
-MESA_VERSION=$(vendor_commit vendor/mesa)
-PULSEAUDIO_COMMIT=$(vendor_commit vendor/pulseaudio)
-WESTON_COMMIT=$(vendor_commit vendor/weston)
+# PulseAudio is the only vendored component built into the system image: use
+# rev-parse, falling back to the "dev" sentinel if vendor/pulseaudio was
+# sourced from a tarball locally.
+PULSEAUDIO_COMMIT=$(git -C vendor/pulseaudio rev-parse HEAD 2>/dev/null || echo "dev")
 
 echo "=== Building Docker image (WSLG_VERSION=$WSLG_VERSION WSLG_COMMIT=$WSLG_COMMIT) ==="
 docker build -f Dockerfile -t system-distro-x64 . \
     --build-arg WSLG_VERSION="$WSLG_VERSION" \
     --build-arg WSLG_COMMIT="$WSLG_COMMIT" \
     --build-arg WSLG_ARCH=x86_64 \
-    --build-arg DIRECTX_HEADERS_VERSION="$DIRECTX_HEADERS_VERSION" \
-    --build-arg FREERDP_COMMIT="$FREERDP_COMMIT" \
-    --build-arg MESA_VERSION="$MESA_VERSION" \
-    --build-arg PULSEAUDIO_COMMIT="$PULSEAUDIO_COMMIT" \
-    --build-arg WESTON_COMMIT="$WESTON_COMMIT"
+    --build-arg PULSEAUDIO_COMMIT="$PULSEAUDIO_COMMIT"
 
 echo ""
 echo "=== Exporting Docker container to tar ==="

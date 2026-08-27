@@ -1,0 +1,43 @@
+name: Build system image
+
+# Every push and pull request. N.B. a push filter that only lists `branches`
+# does not run for tag pushes, so `v*` tags are handled solely by release.yml.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # devops/get-nuget-version.sh derives WSLG_VERSION with `git
+          # describe`, so the tags have to be present.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          # build-and-export.sh converts the tar to a VHD with `go run`ning
+          # hcsshim's tar2ext4.
+          go-version: stable
+
+      - uses: ./.github/actions/build-system-image
+
+      - name: Compress the VHD
+        run: gzip -9 system_x64.vhd
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: system-image-${{ github.sha }}
+          path: system_x64.vhd.gz
+          retention-days: 7
+          # The artifact is already gzipped; skip the zip step's compression.
+          compression-level: 0

@@ -1,0 +1,26 @@
+name: Build the WSLg system image
+description: >
+  Clones the vendored PulseAudio source and runs build-and-export.sh, leaving
+  system_x64.tar and system_x64.vhd in the workspace root.
+
+runs:
+  using: composite
+  steps:
+    - name: Clone vendored PulseAudio
+      shell: bash
+      run: |
+        # PulseAudio is the only vendored component the image builds from
+        # source. Full commit history and tags are required: its meson.build
+        # derives the project version with `git describe`, and a shallow clone
+        # makes the configure step fail with "Index 1 out of bounds of array of
+        # size 1". --filter=blob:none keeps the download small by skipping
+        # historical file contents, which the version stamp does not need.
+        #
+        # The exact commit picked up here is recorded in /etc/versions.txt
+        # inside the image.
+        git clone --filter=blob:none --branch working \
+            https://github.com/microsoft/pulseaudio-mirror.git vendor/pulseaudio
+
+    - name: Build and export the VHD
+      shell: bash
+      run: ./build-and-export.sh

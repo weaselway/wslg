@@ -39,15 +39,13 @@ The WSLg system distro is built using docker build. We essentially start from a 
     git clone https://github.com/microsoft/wslg wslg
 ```
 
-2. Clone the vendor sub-projects (FreeRDP, Weston, PulseAudio, Mesa, DirectX-Headers) into `wslg/vendor/`. The Dockerfile (and `build-and-export.sh`) expect the source code to live there. Use the `working` branch for the mirrored projects; `main` tracks upstream.
+2. Clone PulseAudio into `wslg/vendor/`. It is the only vendored component the system image builds; the compositor (mutter), Mesa and the RDP client live in the user distro and are built by the other scripts in this repo. The Dockerfile (and `build-and-export.sh`) expect the source code to live there. Use the `working` branch of the mirror; `main` tracks upstream.
 
     ```bash
-    git clone https://github.com/microsoft/FreeRDP-mirror wslg/vendor/FreeRDP -b working
-    git clone https://github.com/microsoft/weston-mirror wslg/vendor/weston -b working
     git clone https://github.com/microsoft/PulseAudio-mirror wslg/vendor/pulseaudio -b working
-    git clone https://github.com/microsoft/DirectX-Headers.git wslg/vendor/DirectX-Headers-1.0 -b v1.608.0
-    git clone https://gitlab.freedesktop.org/mesa/mesa.git wslg/vendor/mesa -b mesa-23.1.0
     ```
+
+    > **NOTE:** Clone with full history and tags. PulseAudio derives its version with `git describe`, and a shallow clone makes the build fail with `Index 1 out of bounds of array of size 1` in its `meson.build`.
 
     > **NOTE:** Mesa is hosted on GitLab (`gitlab.freedesktop.org`), which `notice@0` / ClearlyDefined does not auto-harvest, so its license attribution is maintained manually in [`NOTICE-manual.txt`](NOTICE-manual.txt). When bumping the Mesa version, update the commit hash in both [`cgmanifest.json`](cgmanifest.json) and [`NOTICE-manual.txt`](NOTICE-manual.txt) together so the generated NOTICE stays in sync.
 
@@ -58,18 +56,14 @@ The WSLg system distro is built using docker build. We essentially start from a 
     ./build-and-export.sh
     ```
 
-    This produces `system_x64.vhd` in the current directory. If you prefer to do it by hand, pass the same set of `--build-arg`s that `build-and-export.sh` and the production pipeline (wslg-build) use. **All 7 vendor/version `--build-arg`s are required** (`WSLG_VERSION`, `WSLG_COMMIT`, `DIRECTX_HEADERS_VERSION`, `FREERDP_COMMIT`, `MESA_VERSION`, `PULSEAUDIO_COMMIT`, `WESTON_COMMIT`) -- the Dockerfile fails fast at the start of the `dev` stage if any is unset or still holds the `<unknown>` / `unknown` / `<current>` placeholder. `WSLG_ARCH` defaults to `x86_64` and does not need to be passed for a standard build. (Previously the build would silently complete and you'd discover `<unknown>` baked into `/etc/versions.txt` later.)
+    This produces `system_x64.vhd` in the current directory. If you prefer to do it by hand, pass the same set of `--build-arg`s that `build-and-export.sh` and the production pipeline (wslg-build) use. **All 3 vendor/version `--build-arg`s are required** (`WSLG_VERSION`, `WSLG_COMMIT`, `PULSEAUDIO_COMMIT`) -- the Dockerfile fails fast at the start of the `dev` stage if any is unset or still holds the `<unknown>` / `unknown` / `<current>` placeholder. `WSLG_ARCH` defaults to `x86_64` and does not need to be passed for a standard build. (Previously the build would silently complete and you'd discover `<unknown>` baked into `/etc/versions.txt` later.)
 
     ```bash
     sudo docker build -f wslg/Dockerfile -t system-distro-x64 wslg \
         --build-arg WSLG_VERSION="$(cd wslg && ./devops/get-nuget-version.sh -Beta)" \
         --build-arg WSLG_COMMIT="$(git -C wslg rev-parse HEAD)" \
         --build-arg WSLG_ARCH=x86_64 \
-        --build-arg DIRECTX_HEADERS_VERSION="$(git -C wslg/vendor/DirectX-Headers-1.0 rev-parse HEAD)" \
-        --build-arg FREERDP_COMMIT="$(git -C wslg/vendor/FreeRDP rev-parse HEAD)" \
-        --build-arg MESA_VERSION="$(git -C wslg/vendor/mesa rev-parse HEAD)" \
-        --build-arg PULSEAUDIO_COMMIT="$(git -C wslg/vendor/pulseaudio rev-parse HEAD)" \
-        --build-arg WESTON_COMMIT="$(git -C wslg/vendor/weston rev-parse HEAD)"
+        --build-arg PULSEAUDIO_COMMIT="$(git -C wslg/vendor/pulseaudio rev-parse HEAD)"
     sudo docker export "$(sudo docker create system-distro-x64)" > system_x64.tar
 
     # Convert the tar to an ext4 VHD. tar2ext4 is part of hcsshim; the
@@ -109,11 +103,7 @@ To build a debug version of the system distro, append `--build-arg SYSTEMDISTRO_
         --build-arg WSLG_VERSION="$(cd wslg && ./devops/get-nuget-version.sh -Beta)" \
         --build-arg WSLG_COMMIT="$(git -C wslg rev-parse HEAD)" \
         --build-arg WSLG_ARCH=x86_64 \
-        --build-arg DIRECTX_HEADERS_VERSION="$(git -C wslg/vendor/DirectX-Headers-1.0 rev-parse HEAD)" \
-        --build-arg FREERDP_COMMIT="$(git -C wslg/vendor/FreeRDP rev-parse HEAD)" \
-        --build-arg MESA_VERSION="$(git -C wslg/vendor/mesa rev-parse HEAD)" \
         --build-arg PULSEAUDIO_COMMIT="$(git -C wslg/vendor/pulseaudio rev-parse HEAD)" \
-        --build-arg WESTON_COMMIT="$(git -C wslg/vendor/weston rev-parse HEAD)" \
         --build-arg SYSTEMDISTRO_DEBUG_BUILD=true
 ```
 The resulting system distro VHD will have useful development packages installed like gdb and will have compiled all runtime dependencies with the "debug" buildtype for Meson, rather than "release". Debug symbols for the components built from the vendor sources are kept inline rather than split out into `system-debuginfo.tar.gz`.
