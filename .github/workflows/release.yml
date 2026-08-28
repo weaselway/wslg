@@ -19,7 +19,7 @@ jobs:
           # describe`, so the tags have to be present.
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # build-and-export.sh converts the tar to a VHD with `go run`ning
           # hcsshim's tar2ext4.

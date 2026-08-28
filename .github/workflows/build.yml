@@ -17,13 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # devops/get-nuget-version.sh derives WSLG_VERSION with `git
           # describe`, so the tags have to be present.
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # build-and-export.sh converts the tar to a VHD with `go run`ning
           # hcsshim's tar2ext4.
