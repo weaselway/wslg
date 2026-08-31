@@ -6,9 +6,10 @@ ARG MARINER_IMAGE=mcr.microsoft.com/azurelinux/base/core:3.0
 # Create a builder image with the compilers, etc. needed
 FROM ${MARINER_IMAGE} AS build-env
 
-# Install the packages needed to build PulseAudio and WSLGd. The system distro
-# no longer builds a compositor (mutter runs in the user distro), so nothing
-# here pulls in a graphics/X11 stack.
+# Install the packages needed to build WSLGd. The system distro no longer
+# builds a compositor (mutter runs in the user distro) or PulseAudio (the RDP
+# audio bridge talks directly to PipeWire in the user distro instead), so
+# nothing here pulls in a graphics/X11 stack or an audio server.
 RUN echo "== Install build dependencies ==" && \
     tdnf install -y \
         binutils \
@@ -23,8 +24,6 @@ RUN echo "== Install build dependencies ==" && \
         git \
         glibc-devel \
         libcap-devel \
-        libltdl-devel \
-        libsndfile-devel \
         libtool \
         m4 \
         make \
@@ -38,7 +37,6 @@ FROM build-env AS dev
 ARG WSLG_VERSION="<current>"
 ARG WSLG_COMMIT="<unknown>"
 ARG WSLG_ARCH="x86_64"
-ARG PULSEAUDIO_COMMIT="<unknown>"
 ARG SYSTEMDISTRO_DEBUG_BUILD
 
 # Fail fast if any required --build-arg is missing or still holds a
@@ -59,8 +57,7 @@ ARG SYSTEMDISTRO_DEBUG_BUILD
 #     "dev" instead, which this loop permits).
 RUN set -e; \
     for kv in "WSLG_VERSION=${WSLG_VERSION}" \
-              "WSLG_COMMIT=${WSLG_COMMIT}" \
-              "PULSEAUDIO_COMMIT=${PULSEAUDIO_COMMIT}"; do \
+              "WSLG_COMMIT=${WSLG_COMMIT}"; do \
         name=${kv%%=*}; val=${kv#*=}; \
         case "$val" in \
             ""|"<unknown>"|"<current>"|"unknown") \
@@ -70,7 +67,7 @@ RUN set -e; \
                 exit 1 ;; \
         esac; \
     done; \
-    echo "All 3 required --build-arg values present."
+    echo "All 2 required --build-arg values present."
 
 WORKDIR /work
 RUN printf 'WSLg: %s\nArchitecture: %s\nBuilt: %s\nOS: %s\n\n' \
@@ -81,7 +78,6 @@ RUN printf 'WSLg: %s\nArchitecture: %s\nBuilt: %s\nOS: %s\n\n' \
         > /work/versions.txt && \
     printf '%-16s %s\n' \
         'wslg:'            "${WSLG_COMMIT}" \
-        'pulseaudio:'      "${PULSEAUDIO_COMMIT}" \
         >> /work/versions.txt
 
 #
@@ -91,12 +87,8 @@ RUN printf 'WSLg: %s\nArchitecture: %s\nBuilt: %s\nOS: %s\n\n' \
 ENV BUILDTYPE=${SYSTEMDISTRO_DEBUG_BUILD:+debug}
 ENV BUILDTYPE=${BUILDTYPE:-debugoptimized}
 
-ENV BUILDTYPE_NODEBUGSTRIP=${SYSTEMDISTRO_DEBUG_BUILD:+debug}
-ENV BUILDTYPE_NODEBUGSTRIP=${BUILDTYPE_NODEBUGSTRIP:-release}
-
 RUN echo "== System distro build types ==" && \
-    echo "    BUILDTYPE:              ${BUILDTYPE}" && \
-    echo "    BUILDTYPE_NODEBUGSTRIP: ${BUILDTYPE_NODEBUGSTRIP}"
+    echo "    BUILDTYPE:              ${BUILDTYPE}"
 
 ENV DESTDIR=/work/build
 ENV PREFIX=/usr
@@ -111,41 +103,6 @@ ENV CXX=/usr/bin/g++
 # Setup DebugInfo folder
 COPY debuginfo /work/debuginfo
 RUN chmod +x /work/debuginfo/*.sh
-
-# Build PulseAudio. Only the RDP sink/source and the unix native protocol are
-# used (see WSLGd), so every backend that would drag a sound card, X11 or udev
-# into the image is turned off.
-COPY vendor/pulseaudio /work/vendor/pulseaudio
-WORKDIR /work/vendor/pulseaudio
-RUN /usr/bin/meson --prefix=${PREFIX} build \
-        --buildtype=${BUILDTYPE_NODEBUGSTRIP} \
-        -Ddatabase=simple \
-        -Ddoxygen=false \
-        -Dgsettings=disabled \
-        -Dtests=false \
-        -Dman=false \
-        -Dalsa=disabled \
-        -Dasyncns=disabled \
-        -Davahi=disabled \
-        -Dbluez5=disabled \
-        -Delogind=disabled \
-        -Dfftw=disabled \
-        -Dglib=disabled \
-        -Dgstreamer=disabled \
-        -Dgtk=disabled \
-        -Djack=disabled \
-        -Dlirc=disabled \
-        -Dopenssl=disabled \
-        -Dorc=disabled \
-        -Doss-output=disabled \
-        -Dsamplerate=disabled \
-        -Dsoxr=disabled \
-        -Dsystemd=disabled \
-        -Dtcpwrap=disabled \
-        -Dudev=disabled \
-        -Dwebrtc-aec=disabled \
-        -Dx11=disabled && \
-    ninja -C build -j8 install
 
 # Build WSLGd Daemon
 ENV CC=/usr/bin/clang
@@ -168,6 +125,9 @@ RUN if [ -z "$SYSTEMDISTRO_DEBUG_BUILD" ] ; then \
         tar -C /work/build/debuginfo -czf /work/debuginfo/system-debuginfo.tar.gz ./ ; \
     fi
 
+# ensure /etc/ exists
+RUN mkdir -p /work/build/etc/
+
 ########################################################################
 ########################################################################
 
@@ -175,15 +135,16 @@ RUN if [ -z "$SYSTEMDISTRO_DEBUG_BUILD" ] ; then \
 
 FROM ${MARINER_IMAGE} AS runtime
 
-# Runtime dependencies. The system distro runs WSLGd, dbus and PulseAudio only:
-# the compositor, its X server and the RDP client all live outside this image,
-# so no graphics, font or X11 packages are installed.
+# Runtime dependencies. The system distro runs WSLGd and dbus only: the
+# compositor, its X server, the RDP client and the audio server (PipeWire) all
+# live outside this image, so no graphics, font, X11 or audio packages are
+# installed.
 #
 # N.B. The Docker/containerd stack upstream installs here (moby-engine,
 # containerd2, docker-cli, docker-buildx, containernetworking-plugins, runc,
 # iptables) is deliberately left out: nothing in this image starts it -- there
-# is no systemd and WSLGd only launches dbus and PulseAudio -- and it accounted
-# for ~370MB of the image.
+# is no systemd and WSLGd only launches dbus -- and it accounted for ~370MB of
+# the image.
 RUN echo "== Install Runtime Dependencies ==" && \
     tdnf    install -y \
             busybox \
@@ -194,8 +155,6 @@ RUN echo "== Install Runtime Dependencies ==" && \
             e2fsprogs \
             gzip \
             kmod \
-            libltdl \
-            libsndfile \
             iproute \
             nftables \
             procps-ng \
@@ -279,17 +238,6 @@ COPY config/wsl.conf /etc/wsl.conf
 # Copy the built artifacts from the build stage.
 COPY --from=dev /work/build/usr/ /usr/
 COPY --from=dev /work/build/etc/ /etc/
-
-# N.B. The WSLg-specific pulseaudio snippet only ever loaded module-x11-bell,
-# which needs an X server in the system distro. There is none now, so the
-# stock default.pa is used as-is.
-
-# Copy the licensing information for PulseAudio
-COPY --from=dev /work/vendor/pulseaudio/GPL \
-                /work/vendor/pulseaudio/LGPL \
-                /work/vendor/pulseaudio/LICENSE \
-                /work/vendor/pulseaudio/NEWS \
-                /work/vendor/pulseaudio/README /usr/share/doc/pulseaudio/
 
 COPY --from=dev /work/versions.txt /etc/versions.txt
 

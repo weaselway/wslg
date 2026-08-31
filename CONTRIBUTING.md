@@ -15,13 +15,13 @@ or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any addi
 
 # Building the WSLg System Distro
 
-The heart of WSLg is what we call the WSL system distro. This is where the Weston compositor, XWayland and the PulseAudio server are running. The system distro runs these components and projects their communication sockets into the user distro. Every user distro is paired with a unique instance of the system distro. There is a single version of the system distro on disk which is instantiated in memory when a user distro is launched.
+The heart of WSLg is what we call the WSL system distro. It runs WSLGd and dbus, sets up the RDP transport, and projects the shared mount into the user distro. The compositor (mutter), XWayland, the RDP client and the audio server (PipeWire) all run in the user distro. Every user distro is paired with a unique instance of the system distro. There is a single version of the system distro on disk which is instantiated in memory when a user distro is launched.
 
 The system distro is essentially a Linux container packaged and distributed as a vhd. The system distro is accessible to the user, but is mounted read-only. Any changes made by the user to the system distro while it is running are discarded when WSL is restarted. Although a user can log into the system distro, it is not meant to be used as a general purpose user distro. The reason behind this choice is due to the way we service WSLg. When updating WSLg we simply replace the existing system distro with a new one. If the user had data embedded into the system distro vhd, this data would be lost.
 
 For folks who want to tinker with or customize their system distro, we give the ability to run a private version of the system distro. When running a private version of WSLg, Windows will load and run your private and ignore the Microsoft published one. If you update your WSL setup (`wsl --update`), the Microsoft published WSLg vhd will be updated, but you will continue to be running your private. You can switch between the Microsoft pulished WSLg system distro and a private one at any time although it does require restarting WSL (`wsl --shutdown`).
 
-The WSLg system distro is built using docker build. We essentially start from a [Azure Linux 3.0](https://github.com/microsoft/azurelinux) base image, install various packages, then build and install version of Weston, FreeRDP and PulseAudio from our mirror repo. This repository contains a Dockerfile and supporting tools to build the WSLg container and convert the container into an ext4 vhd that Windows will load as the system distro.
+The WSLg system distro is built using docker build. We essentially start from a [Azure Linux 3.0](https://github.com/microsoft/azurelinux) base image, install a small set of runtime packages, then build and install WSLGd. This repository contains a Dockerfile and supporting tools to build the WSLg container and convert the container into an ext4 vhd that Windows will load as the system distro.
 
 ## Build instructions
 
@@ -39,31 +39,24 @@ The WSLg system distro is built using docker build. We essentially start from a 
     git clone https://github.com/microsoft/wslg wslg
 ```
 
-2. Clone PulseAudio into `wslg/vendor/`. It is the only vendored component the system image builds; the compositor (mutter), Mesa and the RDP client live in the user distro and are built by the other scripts in this repo. The Dockerfile (and `build-and-export.sh`) expect the source code to live there. Use the `working` branch of the mirror; `main` tracks upstream.
-
-    ```bash
-    git clone https://github.com/microsoft/PulseAudio-mirror wslg/vendor/pulseaudio -b working
-    ```
-
-    > **NOTE:** Clone with full history and tags. PulseAudio derives its version with `git describe`, and a shallow clone makes the build fail with `Index 1 out of bounds of array of size 1` in its `meson.build`.
+2. The system image no longer builds any vendored component from source -- it contains only WSLGd and dbus. The compositor (mutter), Mesa and the RDP client live in the user distro and are built by the other scripts in this repo; audio is served by a PipeWire instance in the user distro (see the RDP audio bridge in mutter's `src/backends/rdp/meta-rdp-audio.c`), not by anything in this image.
 
     > **NOTE:** Mesa is hosted on GitLab (`gitlab.freedesktop.org`), which `notice@0` / ClearlyDefined does not auto-harvest, so its license attribution is maintained manually in [`NOTICE-manual.txt`](NOTICE-manual.txt). When bumping the Mesa version, update the commit hash in both [`cgmanifest.json`](cgmanifest.json) and [`NOTICE-manual.txt`](NOTICE-manual.txt) together so the generated NOTICE stays in sync.
 
-3. Build the VHD. The easiest path is the helper script, which derives a version from `git describe`, captures each vendor's commit SHA, passes everything as `--build-arg`, runs `docker build`, exports the container, and converts to a VHD via `tar2ext4`:
+3. Build the VHD. The easiest path is the helper script, which derives a version from `git describe`, passes it and the commit SHA as `--build-arg`, runs `docker build`, exports the container, and converts to a VHD via `tar2ext4`:
 
     ```bash
     cd wslg
     ./build-and-export.sh
     ```
 
-    This produces `system_x64.vhd` in the current directory. If you prefer to do it by hand, pass the same set of `--build-arg`s that `build-and-export.sh` and the production pipeline (wslg-build) use. **All 3 vendor/version `--build-arg`s are required** (`WSLG_VERSION`, `WSLG_COMMIT`, `PULSEAUDIO_COMMIT`) -- the Dockerfile fails fast at the start of the `dev` stage if any is unset or still holds the `<unknown>` / `unknown` / `<current>` placeholder. `WSLG_ARCH` defaults to `x86_64` and does not need to be passed for a standard build. (Previously the build would silently complete and you'd discover `<unknown>` baked into `/etc/versions.txt` later.)
+    This produces `system_x64.vhd` in the current directory. If you prefer to do it by hand, pass the same set of `--build-arg`s that `build-and-export.sh` and the production pipeline (wslg-build) use. **Both version `--build-arg`s are required** (`WSLG_VERSION`, `WSLG_COMMIT`) -- the Dockerfile fails fast at the start of the `dev` stage if any is unset or still holds the `<unknown>` / `unknown` / `<current>` placeholder. `WSLG_ARCH` defaults to `x86_64` and does not need to be passed for a standard build. (Previously the build would silently complete and you'd discover `<unknown>` baked into `/etc/versions.txt` later.)
 
     ```bash
     sudo docker build -f wslg/Dockerfile -t system-distro-x64 wslg \
         --build-arg WSLG_VERSION="$(cd wslg && ./devops/get-nuget-version.sh -Beta)" \
         --build-arg WSLG_COMMIT="$(git -C wslg rev-parse HEAD)" \
-        --build-arg WSLG_ARCH=x86_64 \
-        --build-arg PULSEAUDIO_COMMIT="$(git -C wslg/vendor/pulseaudio rev-parse HEAD)"
+        --build-arg WSLG_ARCH=x86_64
     sudo docker export "$(sudo docker create system-distro-x64)" > system_x64.tar
 
     # Convert the tar to an ext4 VHD. tar2ext4 is part of hcsshim; the
@@ -103,7 +96,6 @@ To build a debug version of the system distro, append `--build-arg SYSTEMDISTRO_
         --build-arg WSLG_VERSION="$(cd wslg && ./devops/get-nuget-version.sh -Beta)" \
         --build-arg WSLG_COMMIT="$(git -C wslg rev-parse HEAD)" \
         --build-arg WSLG_ARCH=x86_64 \
-        --build-arg PULSEAUDIO_COMMIT="$(git -C wslg/vendor/pulseaudio rev-parse HEAD)" \
         --build-arg SYSTEMDISTRO_DEBUG_BUILD=true
 ```
 The resulting system distro VHD will have useful development packages installed like gdb and will have compiled all runtime dependencies with the "debug" buildtype for Meson, rather than "release". Debug symbols for the components built from the vendor sources are kept inline rather than split out into `system-debuginfo.tar.gz`.

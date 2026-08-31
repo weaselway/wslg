@@ -186,7 +186,7 @@ try {
     auto passwordEntry = monitor.GetUserInfo();
 
     // Set required environment variables. These are inherited by the child
-    // processes WSLGd launches (dbus-daemon and pulseaudio); the compositor and
+    // processes WSLGd launches (just dbus-daemon now); the compositor and
     // the RDP client run in the user distro and get their environment there.
     struct envVar{ const char* name; const char* value; bool override; };
     envVar variables[] = {
@@ -196,9 +196,6 @@ try {
         {"SHELL", passwordEntry->pw_shell, true},
         {"PATH", "/usr/sbin:/usr/bin:/sbin:/bin:/usr/games", true},
         {"XDG_RUNTIME_DIR", c_xdgRuntimeDir, false},
-        {"PULSE_SERVER", SHARE_PATH "/PulseServer", false},
-        {"PULSE_AUDIO_RDP_SINK", SHARE_PATH "/PulseAudioRDPSink", false},
-        {"PULSE_AUDIO_RDP_SOURCE", SHARE_PATH "/PulseAudioRDPSource", false},
     };
 
     for (auto &var : variables) {
@@ -341,33 +338,10 @@ try {
         std::vector<cap_value_t>{CAP_SETGID, CAP_SETUID}
     );
 
-    // Construct pulseaudio launch command line.
-    std::string pulseaudioLaunchArgs =
-        "/usr/bin/dbus-launch "
-        "/usr/bin/pulseaudio "
-        "--log-time=true "
-        "--disallow-exit=true "
-        "--exit-idle-time=-1 "
-        "--load=\"module-rdp-sink sink_name=RDPSink\" "
-        "--load=\"module-rdp-source source_name=RDPSource\" "
-        "--load=\"module-native-protocol-unix socket=" SHARE_PATH "/PulseServer auth-anonymous=true\" ";
-
-    // Construct log file option string.
-    std::string pulseaudioLogFileOption("--log-target=");
-    auto pulseAudioLogFilePathEnv = getenv("WSLG_PULSEAUDIO_LOG_PATH");
-    if (pulseAudioLogFilePathEnv) {
-        pulseaudioLogFileOption += pulseAudioLogFilePathEnv;
-    } else {
-        pulseaudioLogFileOption += "newfile:" SHARE_PATH "/pulseaudio.log";
-    }
-    pulseaudioLaunchArgs += pulseaudioLogFileOption;
-
-    // Launch pulseaudio and the associated dbus daemon.
-    monitor.LaunchProcess(std::vector<std::string>{
-        "/usr/bin/sh",
-        "-c",
-        std::move(pulseaudioLaunchArgs)
-    });
+    // Audio no longer runs through WSLGd: the RDP audio bridge connects
+    // directly to a PipeWire instance in the user distro (see
+    // mutter/src/backends/rdp/meta-rdp-audio.c), so there is nothing left for
+    // WSLGd to launch here.
 
     return monitor.Run();
 }

@@ -5,8 +5,7 @@
 set -eo pipefail
 
 # Local dev build: derive a clean NuGet-style version plus the full
-# commit SHA for the wslg repo, plus version identifiers for each
-# vendor component, all of which the Dockerfile bakes into
+# commit SHA for the wslg repo, both of which the Dockerfile bakes into
 # /etc/versions.txt. CI uses the same get-nuget-version.sh helper with
 # a branch-derived separator (see wslg-build's pipeline-shared.yml).
 #
@@ -22,17 +21,11 @@ WSLG_VERSION=${WSLG_VERSION:-dev}
 # build successfully.
 WSLG_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "dev")
 
-# PulseAudio is the only vendored component built into the system image: use
-# rev-parse, falling back to the "dev" sentinel if vendor/pulseaudio was
-# sourced from a tarball locally.
-PULSEAUDIO_COMMIT=$(git -C vendor/pulseaudio rev-parse HEAD 2>/dev/null || echo "dev")
-
 echo "=== Building Docker image (WSLG_VERSION=$WSLG_VERSION WSLG_COMMIT=$WSLG_COMMIT) ==="
 docker build -f Dockerfile -t system-distro-x64 . \
     --build-arg WSLG_VERSION="$WSLG_VERSION" \
     --build-arg WSLG_COMMIT="$WSLG_COMMIT" \
-    --build-arg WSLG_ARCH=x86_64 \
-    --build-arg PULSEAUDIO_COMMIT="$PULSEAUDIO_COMMIT"
+    --build-arg WSLG_ARCH=x86_64
 
 echo ""
 echo "=== Exporting Docker container to tar ==="
