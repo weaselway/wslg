@@ -28,9 +28,10 @@ constexpr auto c_sharedMemoryObDirectoryPathEnv = "WSL2_SHARED_MEMORY_OB_DIRECTO
 
 // WSLGd does not launch a compositor or an RDP client. It publishes the RDP
 // transport info to a shell-sourceable env file in the shared /mnt/wslg mount.
-// A launcher in the user distro (see run-vsock.sh) sources this file, starts its
-// own mutter bound to the published vsock port, and starts the RDP client
-// itself. Neither mutter nor the RDP client is baked into the system image.
+// The user distro (weaselway's session units and start-viewer.sh) reads this
+// file, starts its own mutter bound to the published vsock port, and starts the
+// RDP client itself. Neither mutter nor the RDP client is baked into the system
+// image.
 constexpr auto c_mutterEnvFile = SHARE_PATH "/mutter-rdp.env";
 
 // The virtiofs tag WSLGd uses for the shared-memory DAX share. It is VM-wide, so
@@ -81,7 +82,7 @@ std::string ToServiceId(unsigned int port)
 
 // Publish the RDP transport info to a shell-sourceable env file in the shared
 // mount. Written to a temp file then renamed so a reader never observes a
-// partial file. A user-distro launcher (run-vsock.sh) sources this file to learn
+// partial file. The user distro (weaselway) reads this file to learn
 // the vsock port to bind, the hvsocket service id the RDP client must connect
 // to, and the shared memory the compositor may use. This file is data only: it
 // does not exec anything and imposes no library paths, so the launcher is free
@@ -124,8 +125,16 @@ void WriteMutterEnvFile(
         // WSL service. The RDP client needs it (/wslgsharedmemorypath:) to map
         // the same memory from the Windows side.
         if (sharedMemoryObDirectoryPath) {
+            // Single-quoted for the shell; a ' inside has to close the
+            // quote, add an escaped one and reopen it.
             contents += "WSLG_SHARED_MEMORY_OB_DIRECTORY='";
-            contents += sharedMemoryObDirectoryPath;
+            for (const char *c = sharedMemoryObDirectoryPath; *c; c++) {
+                if (*c == '\'') {
+                    contents += "'\\''";
+                } else {
+                    contents += *c;
+                }
+            }
             contents += "'\n";
         }
     }
