@@ -1,60 +1,44 @@
 {
-  description = "WSLg mutter RDP/VAIL backend dev environment";
+  description = "WSLg (WSLGd + rdpapplist) dev environment";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
   };
 
-  outputs = inputs: let
-    forAllSystems = f:
-      builtins.mapAttrs (system: pkgs: f system pkgs) inputs.nixpkgs.legacyPackages;
-  in {
-    devShells = forAllSystems (system: pkgs: {
-      default = pkgs.mkShell {
-        # Pull in the full build/runtime dependency closure of nixpkgs' own
-        # mutter derivation, so our from-source build sees the same libraries.
-        inputsFrom = [ pkgs.mutter ];
+  outputs =
+    { self, nixpkgs }:
+    let
+      forAllSystems =
+        f:
+        nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ] (
+          system: f nixpkgs.legacyPackages.${system}
+        );
+    in
+    {
+      devShells = forAllSystems (pkgs: {
+        # The Dockerfile builds WSLGd with clang.
+        default = (pkgs.mkShell.override { stdenv = pkgs.clangStdenv; }) {
+          packages = with pkgs; [
+            meson
+            ninja
+            pkg-config
+            gdb
+            git
 
-        hardeningDisable = ["fortify"];
+            # WSLGd links -lcap
+            libcap
 
-        # Extra deps for the in-process RDP/VAIL backend (task 01) plus general
-        # build tooling that is handy in a dev shell.
-        packages = with pkgs; [
-          # build tooling
-          meson
-          ninja
-          pkg-config
-          cmake
-          gcc
-          gdb
-          git
+            # rdpapplist wants freerdp3/winpr3
+            freerdp
+          ];
 
-          # Build deps for the Microsoft FreeRDP fork (FreeRDP 2.4.0), which we
-          # build from vendor/FreeRDP into _install via build-freerdp.sh and then
-          # always link mutter against (it ships the gfxredir server channel =
-          # VAIL fast path). We deliberately do NOT pull nixpkgs' own freerdp:
-          # everything links against our _install copy so it stays portable.
-          openssl
-          zlib
-          libusb1
-          cups
-          icu
+          # Keeps the default (debug, -O0) meson builds free of _FORTIFY_SOURCE warnings.
+          hardeningDisable = [ "fortify" ];
 
-          # convenience for introspecting deps
-          pkg-config
-        ];
-
-        shellHook = ''
-          echo "mutter dev shell (nixpkgs mutter ${pkgs.mutter.version})"
-          echo "freerdp:     ./build-freerdp.sh   (MS fork -> _install)"
-          echo "configure:   ./build.sh"
-        '';
-      };
-    });
-
-    packages = forAllSystems (system: pkgs: {
-      inherit (pkgs) mutter;
-      default = pkgs.mutter;
-    });
-  };
+          shellHook = ''
+            echo "build with: ./weaselway-build.sh   (see WEASELWAY.md)"
+          '';
+        };
+      });
+    };
 }
