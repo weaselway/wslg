@@ -5,16 +5,13 @@
 
 set -eu -o pipefail
 
-source /mnt/wslg/mutter-rdp.env
-
-SHARED_MEMORY_ARGS=()
-if [ -n "${WSLG_SHARED_MEMORY_OB_DIRECTORY:-}" ]; then
-    SHARED_MEMORY_ARGS=(/wslgsharedmemorypath:"$WSLG_SHARED_MEMORY_OB_DIRECTORY")
-fi
+# Same port as run.sh; the share's NT path is named after the VM.
+PORT="${MUTTER_RDP_VSOCK_PORT:-3389}"
+VM_ID="$(exec -a wslinfo /init --vm-id -n)"
 
 ./sdl-freerdp.exe /u:dummy /d:dummy /p:dummy \
-    /v:vsock://"$WSLG_VM_ID":"$MUTTER_RDP_VSOCK_PORT" \
-    "${SHARED_MEMORY_ARGS[@]}" \
+    /v:vsock://"$VM_ID":"$PORT" \
+    /wslgsharedmemorypath:"WSL\\${VM_ID^^}\\wslg" \
     /cert:ignore \
     /dynamic-resolution \
     /w:1280 \

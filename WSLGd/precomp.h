@@ -1,6 +1,5 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
-#include <sys/capability.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include <sys/prctl.h>
@@ -21,7 +20,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <algorithm>
-#include <linux/vm_sockets.h>
 #include <array>
 #include <filesystem>
 #include <map>

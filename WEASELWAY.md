@@ -23,8 +23,8 @@ build dir on the first run and then compiles:
 
 ## Notes
 
-- WSLGd only needs libcap. rdpapplist needs freerdp3/winpr3, which the shell
-  takes from nixpkgs (3.x).
+- WSLGd needs nothing beyond the C++ standard library. rdpapplist needs
+  freerdp3/winpr3, which the shell takes from nixpkgs (3.x).
 - The shell disables `_FORTIFY_SOURCE` hardening. With it on, every file of
   the default `-O0` debug build warns that fortify needs optimization.
 - Not covered: [WSLDVCPlugin](WSLDVCPlugin), which is a Windows MSVC project.

@@ -25,9 +25,6 @@
             gdb
             git
 
-            # WSLGd links -lcap
-            libcap
-
             # rdpapplist wants freerdp3/winpr3
             freerdp
           ];

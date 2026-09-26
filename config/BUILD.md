@@ -62,5 +62,5 @@ For self-hosting WSLG check use this instructions https://github.com/microsoft/w
     wsl --system [DistroName]
     ```
 
-    Note the system distro only runs WSLGd and dbus. Audio (PipeWire) and the compositor are not started here: WSLGd publishes the RDP transport to `/mnt/wslg/mutter-rdp.env`, and mutter and the RDP
-    client are started from the user distro. Check that file exists to confirm WSLGd got that far.
+    Note the system distro only runs WSLGd, which creates `/mnt/wslg/.X11-unix` and `/mnt/wslg/runtime-dir` and then idles. Audio (PipeWire), the compositor and the RDP
+    client all run from the user distro. `/mnt/wslg/stderr.log` should end with WSLGd's "ready" line.

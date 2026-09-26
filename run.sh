@@ -38,23 +38,20 @@ systemctl --user set-environment GALLIUM_DRIVER="$GALLIUM_DRIVER"
 systemctl --user set-environment MESA_D3D12_DEFAULT_ADAPTER_NAME="$MESA_D3D12_DEFAULT_ADAPTER_NAME"
 systemctl --user set-environment XDG_CURRENT_DESKTOP="$XDG_CURRENT_DESKTOP"
 
-# Lookup wsl conncetion data for mutter
-source "/mnt/wslg/mutter-rdp.env"
-export MUTTER_RDP_VSOCK_PORT
+# A fixed vsock port; viewer.sh connects to the same one.
+export MUTTER_RDP_VSOCK_PORT="${MUTTER_RDP_VSOCK_PORT:-3389}"
 
-# WSLGd mounts the shared-memory DAX share only in the system-distro mount
-# namespace (/mnt/shared_memory), which is invisible here. If a virtiofs tag was
-# published, mount the same VM-wide share ourselves at a user-distro path. Only
-# the mount/mkdir/chmod need root, so scope sudo to those; mutter runs as us.
+# The shared-memory share WSL creates as virtiofs tag "wslg" when a system
+# distro is configured. Nothing mounts it for us, and without it mutter only
+# sends its error frame. Only the mount/mkdir/chmod need root, so scope sudo to
+# those; mutter runs as us.
 SHARED_MEMORY_MOUNT_POINT="${SHARED_MEMORY_MOUNT_POINT:-/mnt/wslg-shared-memory}"
-if [ -n "${WSLG_SHARED_MEMORY_VIRTIO_TAG:-}" ]; then
-  if ! mountpoint -q "${SHARED_MEMORY_MOUNT_POINT}"; then
-    sudo mkdir -p "${SHARED_MEMORY_MOUNT_POINT}"
-    sudo mount -t virtiofs -o dax "${WSLG_SHARED_MEMORY_VIRTIO_TAG}" "${SHARED_MEMORY_MOUNT_POINT}"
-    sudo chmod 0777 "${SHARED_MEMORY_MOUNT_POINT}"
-  fi
-  export WSL2_SHARED_MEMORY_MOUNT_POINT="${SHARED_MEMORY_MOUNT_POINT}"
+if ! mountpoint -q "${SHARED_MEMORY_MOUNT_POINT}"; then
+  sudo mkdir -p "${SHARED_MEMORY_MOUNT_POINT}"
+  sudo mount -t virtiofs -o dax wslg "${SHARED_MEMORY_MOUNT_POINT}"
+  sudo chmod 0777 "${SHARED_MEMORY_MOUNT_POINT}"
 fi
+export WSL2_SHARED_MEMORY_MOUNT_POINT="${SHARED_MEMORY_MOUNT_POINT}"
 
 exec gnome-shell \
   --headless \

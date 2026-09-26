@@ -4,6 +4,4 @@ project('WSLGd', 'cpp',
 
 executable('WSLGd',
            'main.cpp',
-           'ProcessMonitor.cpp',
-           link_args: '-lcap',
            install : true)

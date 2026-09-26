@@ -9,21 +9,20 @@ FROM ${MARINER_IMAGE} AS build-env
 # Install the packages needed to build WSLGd. The system distro no longer
 # builds a compositor (mutter runs in the user distro) or PulseAudio (the RDP
 # audio bridge talks directly to PipeWire in the user distro instead), so
-# nothing here pulls in a graphics/X11 stack or an audio server.
+# nothing here pulls in a graphics/X11 stack or an audio server. WSLGd itself
+# needs nothing beyond the C++ standard library.
 RUN echo "== Install build dependencies ==" && \
     tdnf install -y \
         binutils \
         build-essential \
         ca-certificates \
         clang \
-        dbus-devel \
         diffutils \
         file-libs \
         gcc \
         gettext \
         git \
         glibc-devel \
-        libcap-devel \
         libtool \
         m4 \
         make \
@@ -135,22 +134,23 @@ RUN mkdir -p /work/build/etc/
 
 FROM ${MARINER_IMAGE} AS runtime
 
-# Runtime dependencies. The system distro runs WSLGd and dbus only: the
-# compositor, its X server, the RDP client and the audio server (PipeWire) all
-# live outside this image, so no graphics, font, X11 or audio packages are
-# installed.
+# Runtime dependencies. The system distro runs WSLGd only, which sets up a
+# couple of directories in /mnt/wslg and then idles: the compositor, its X
+# server, the RDP client and the audio server (PipeWire) all live outside this
+# image, so no graphics, font, X11, audio or dbus packages are installed. The
+# rest of the list is the base upstream's system distro has; trimming it
+# further needs testing on a real WSL install first.
 #
 # N.B. The Docker/containerd stack upstream installs here (moby-engine,
 # containerd2, docker-cli, docker-buildx, containernetworking-plugins, runc,
 # iptables) is deliberately left out: nothing in this image starts it -- there
-# is no systemd and WSLGd only launches dbus -- and it accounted for ~370MB of
+# is no systemd and WSLGd launches nothing -- and it accounted for ~370MB of
 # the image.
 RUN echo "== Install Runtime Dependencies ==" && \
     tdnf    install -y \
             busybox \
             ca-certificates \
             chrony \
-            dbus \
             dhcpcd \
             e2fsprogs \
             gzip \
@@ -197,7 +197,8 @@ RUN if [ -z "$SYSTEMDISTRO_DEBUG_BUILD" ] ; then \
         erase $(rpm -qa | grep -- '^perl-') && \
         # Remove all -devel packages \
         erase $(rpm -qa | grep -- '-devel') && \
-        # Remove systemd components (except systemd-libs which is needed by WSLGd) \
+        # Remove systemd components (except systemd-libs, which util-linux and \
+        # procps-ng link) \
         erase $(rpm -qa | grep -- '^systemd-' | grep -v systemd-libs) && \
         # Remove orphaned packages \
         tdnf autoremove -y && \

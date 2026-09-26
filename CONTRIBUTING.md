@@ -15,7 +15,7 @@ or contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any addi
 
 # Building the WSLg System Distro
 
-The heart of WSLg is what we call the WSL system distro. It runs WSLGd and dbus, sets up the RDP transport, and projects the shared mount into the user distro. The compositor (mutter), XWayland, the RDP client and the audio server (PipeWire) all run in the user distro. Every user distro is paired with a unique instance of the system distro. There is a single version of the system distro on disk which is instantiated in memory when a user distro is launched.
+The heart of WSLg is what we call the WSL system distro. It runs WSLGd, which sets up the directories WSL expects in the shared `/mnt/wslg` mount and then idles; weaselway needs the system distro only because WSL creates the shared-memory share mutter hands its frames over on only when one is configured. The compositor (mutter), XWayland, the RDP client and the audio server (PipeWire) all run in the user distro. Every user distro is paired with a unique instance of the system distro. There is a single version of the system distro on disk which is instantiated in memory when a user distro is launched.
 
 The system distro is essentially a Linux container packaged and distributed as a vhd. The system distro is accessible to the user, but is mounted read-only. Any changes made by the user to the system distro while it is running are discarded when WSL is restarted. Although a user can log into the system distro, it is not meant to be used as a general purpose user distro. The reason behind this choice is due to the way we service WSLg. When updating WSLg we simply replace the existing system distro with a new one. If the user had data embedded into the system distro vhd, this data would be lost.
 
@@ -39,7 +39,7 @@ The WSLg system distro is built using docker build. We essentially start from a 
     git clone https://github.com/microsoft/wslg wslg
 ```
 
-2. The system image no longer builds any vendored component from source -- it contains only WSLGd and dbus. The compositor (mutter), Mesa and the RDP client live in the user distro and are built by the other scripts in this repo; audio is served by a PipeWire instance in the user distro (see the RDP audio bridge in mutter's `src/backends/rdp/meta-rdp-audio.c`), not by anything in this image.
+2. The system image no longer builds any vendored component from source -- it contains only WSLGd. The compositor (mutter), Mesa and the RDP client live in the user distro and are built by the other scripts in this repo; audio is served by a PipeWire instance in the user distro (see the RDP audio bridge in mutter's `src/backends/rdp/meta-rdp-audio.c`), not by anything in this image.
 
     > **NOTE:** Mesa is hosted on GitLab (`gitlab.freedesktop.org`), which `notice@0` / ClearlyDefined does not auto-harvest, so its license attribution is maintained manually in [`NOTICE-manual.txt`](NOTICE-manual.txt). When bumping the Mesa version, update the commit hash in both [`cgmanifest.json`](cgmanifest.json) and [`NOTICE-manual.txt`](NOTICE-manual.txt) together so the generated NOTICE stays in sync.
 
