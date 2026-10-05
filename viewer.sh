@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Development shortcut: connect sdl-freerdp.exe from the current directory to
-# the session. weaselway's start-viewer.sh is the maintained version.
+# the session. weaselway's ww-start-viewer.sh is the maintained version.
 
 set -eu -o pipefail
 
